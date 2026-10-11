@@ -16,6 +16,17 @@ pub struct Settings {
     pub prefs: Prefs,
     /// Audio and subtitle picks per show (or movie), keyed by rating key.
     pub tracks: BTreeMap<String, TrackChoice>,
+    /// The Seerr (or Overseerr/Jellyseerr) server used for requests.
+    pub seerr: SeerrSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SeerrSettings {
+    /// Empty when requests aren't set up.
+    pub url: String,
+    /// Only used when signing in with the Plex account doesn't work.
+    pub api_key: String,
 }
 
 /// The tracks someone picked, described so they can be found again in
