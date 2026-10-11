@@ -7,6 +7,7 @@ export type Route =
   | { name: "library"; section: LibrarySection }
   | { name: "item"; ratingKey: string }
   | { name: "search"; query: string }
+  | { name: "settings" }
   | { name: "player"; ratingKey: string; resume: boolean };
 
 export interface Nav {
@@ -33,6 +34,8 @@ export function routeKey(r: Route) {
       return `item:${r.ratingKey}`;
     case "search":
       return `search:${r.query}`;
+    case "settings":
+      return "settings";
     case "player":
       return `player:${r.ratingKey}`;
   }

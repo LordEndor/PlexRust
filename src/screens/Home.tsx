@@ -25,6 +25,7 @@ import { ItemView } from "@/screens/ItemView";
 import { LibraryView } from "@/screens/LibraryView";
 import { Player } from "@/screens/Player";
 import { SearchView } from "@/screens/SearchView";
+import { SettingsView } from "@/screens/SettingsView";
 
 const sectionIcon = { movie: Film, show: Tv, artist: Music, photo: Image } as const;
 const MAX_STACK = 15;
@@ -71,6 +72,11 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
 
   const back = useCallback(() => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s)), []);
   const goRoot = (route: Route) => setStack([route]);
+  // The next episode replaces the current one, so Back still leads to where playback started.
+  const playNext = useCallback(
+    (ratingKey: string) => setStack((s) => [...s.slice(0, -1), { name: "player", ratingKey, resume: false }]),
+    [],
+  );
 
   useEffect(() => {
     const onMouse = (e: MouseEvent) => e.button === 3 && back();
@@ -118,7 +124,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
                 />
               ))}
           <div className="flex-1" />
-          <NavItem icon={Settings} label="Settings" />
+          <NavItem icon={Settings} label="Settings" active={root.name === "settings"} onClick={() => goRoot({ name: "settings" })} />
           <div className="mt-2 flex items-center gap-2 rounded-lg border p-2">
             <UserAvatar user={user} />
             <div className="min-w-0 flex-1 truncate text-sm">{user.title || user.username}</div>
@@ -160,7 +166,9 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
               ),
             )}
           </main>
-          {top.name === "player" && <Player ratingKey={top.ratingKey} resume={top.resume} onClose={back} />}
+          {top.name === "player" && (
+            <Player key={top.ratingKey} ratingKey={top.ratingKey} resume={top.resume} onClose={back} onPlayNext={playNext} />
+          )}
         </div>
       </div>
     </NavContext.Provider>
@@ -177,6 +185,8 @@ function Screen({ route }: { route: Route }) {
       return <ItemView ratingKey={route.ratingKey} />;
     case "search":
       return <SearchView query={route.query} />;
+    case "settings":
+      return <SettingsView />;
     case "player":
       return null;
   }

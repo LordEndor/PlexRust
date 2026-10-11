@@ -13,6 +13,7 @@ import {
 import {
   ArrowLeft,
   AudioLines,
+  ChevronsRight,
   Captions,
   Gauge,
   Loader2,
@@ -35,7 +36,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { errorMessage } from "@/lib/api";
+import { errorMessage, imageUrl } from "@/lib/api";
+import { useNav } from "@/lib/nav";
+import { loadPrefs, usePrefs } from "@/lib/prefs";
 import { formatTime, playback, QUALITIES, type PlaybackInfo, type PlaybackState, type Quality } from "@/lib/player";
 import { cn } from "@/lib/utils";
 
@@ -61,6 +64,8 @@ const REPORT_EVERY_MS = 10_000;
 const LOAD_TIMEOUT_MS = 45_000;
 /** What to fall back to when the original file won't play. */
 const FALLBACK = QUALITIES[1];
+/** Seconds the Up Next card counts down before moving on by itself. */
+const UP_NEXT_SECS = 10;
 const HIDE_CONTROLS_MS = 3000;
 
 interface Track {
@@ -84,9 +89,13 @@ interface Props {
   ratingKey: string;
   resume: boolean;
   onClose: () => void;
+  /** Plays another episode in place of this one. */
+  onPlayNext: (ratingKey: string) => void;
 }
 
-export function Player({ ratingKey, resume, onClose }: Props) {
+export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
+  const { server } = useNav();
+  const prefs = usePrefs();
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
@@ -100,6 +109,10 @@ export function Player({ ratingKey, resume, onClose }: Props) {
   const [quality, setQuality] = useState<Quality>(QUALITIES[0]);
   const [controls, setControls] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  // The skip button for the intro or credits marker being played.
+  const [skip, setSkip] = useState<{ label: string; to: number } | null>(null);
+  // Shown once the ending credits start; countdown is null when waiting for a click.
+  const [upNext, setUpNext] = useState<{ countdown: number | null } | null>(null);
 
   // Latest values for timers and cleanup, which outlive any one render.
   const live = useRef({ time: 0, duration: 0, paused: false, info: null as PlaybackInfo | null });
@@ -110,6 +123,24 @@ export function Player({ ratingKey, resume, onClose }: Props) {
   const clickTimer = useRef<number | undefined>(undefined);
   const close = useRef(onClose);
   close.current = onClose;
+  // Markers already auto-skipped or dismissed, by index.
+  const handledMarkers = useRef(new Set<number>());
+  const finished = useRef(false);
+  const flash = useCallback((text: string, ms = 3000) => {
+    setNotice(text);
+    window.setTimeout(() => setNotice((n) => (n === text ? null : n)), ms);
+  }, []);
+
+  // Done with this item: on to the next episode, or back out of the player.
+  // Either way it's reported as watched to the end.
+  const finish = useCallback(() => {
+    finished.current = true;
+    const next = live.current.info?.next;
+    if (next) onPlayNext(next.ratingKey);
+    else close.current();
+  }, [onPlayNext]);
+  const finishRef = useRef(finish);
+  finishRef.current = finish;
 
   const report = useCallback(
     (state: PlaybackState) => {
@@ -131,7 +162,13 @@ export function Player({ ratingKey, resume, onClose }: Props) {
         const pi = await playback.info(ratingKey);
         if (disposed) return;
         setInfo(pi);
-        const args = pi.logPath ? [...MPV_ARGS, `--log-file=${pi.logPath}`] : MPV_ARGS;
+        const prefs = await loadPrefs();
+        if (disposed) return;
+        const args = [...MPV_ARGS];
+        if (pi.logPath) args.push(`--log-file=${pi.logPath}`);
+        if (prefs.audioLanguage) args.push(`--alang=${prefs.audioLanguage}`);
+        if (prefs.subtitleLanguage === "off") args.push("--sid=no");
+        else if (prefs.subtitleLanguage) args.push(`--slang=${prefs.subtitleLanguage}`);
         const config: MpvConfig = { path: pi.mpvPath, args, observedProperties: OBSERVED, ipcTimeoutMs: 5000 };
         await init(config);
         if (disposed) return destroy();
@@ -162,8 +199,8 @@ export function Player({ ratingKey, resume, onClose }: Props) {
                 break;
               case "eof-reached":
                 if (data) {
-                  report("stopped");
-                  close.current();
+                  if (pi.next && prefs.skipCredits !== "off") finishRef.current();
+                  else close.current();
                 }
                 break;
             }
@@ -223,7 +260,14 @@ export function Player({ ratingKey, resume, onClose }: Props) {
         );
 
         if (pi.stripDolbyVision) await setProperty<string>("vf", "format:dolbyvision=no");
-        await load(pi.url, start);
+        const preferred = QUALITIES.find((q) => q.label === prefs.quality && q.kbps);
+        if (preferred) {
+          transcoding.current = true;
+          setQuality(preferred);
+          await load(await playback.transcodeUrl(pi.ratingKey, preferred.kbps!, preferred.resolution!, session.current), start);
+        } else {
+          await load(pi.url, start);
+        }
       } catch (e) {
         if (!disposed) setError(errorMessage(e));
       }
@@ -231,6 +275,7 @@ export function Player({ ratingKey, resume, onClose }: Props) {
 
     return () => {
       disposed = true;
+      if (finished.current) live.current.time = live.current.duration;
       report("stopped");
       unlisten.forEach((u) => u());
       destroy().catch(() => {});
@@ -255,6 +300,50 @@ export function Player({ ratingKey, resume, onClose }: Props) {
   const togglePause = useCallback(() => command("cycle", ["pause"]).catch(() => {}), []);
   const seekBy = useCallback((secs: number) => command("seek", [secs, "relative", "exact"]).catch(() => {}), []);
   const seekTo = useCallback((secs: number) => command("seek", [secs, "absolute", "exact"]).catch(() => {}), []);
+
+  // Intro and credits markers: skip them, offer a button, or bring up Up Next.
+  useEffect(() => {
+    if (!info || !prefs || buffering) return;
+    const ms = time * 1000;
+    const i = info.markers.findIndex((m) => ms >= m.startTimeOffset && ms < m.endTimeOffset - 1000);
+    const m = info.markers[i];
+    const ending =
+      m?.type === "credits" && (!!m.final || m.endTimeOffset >= info.durationMs - 5000) && prefs.skipCredits !== "off";
+
+    if (ending) {
+      setSkip(null);
+      if (!handledMarkers.current.has(i)) {
+        handledMarkers.current.add(i);
+        setUpNext({ countdown: prefs.skipCredits === "auto" ? UP_NEXT_SECS : null });
+      }
+      return;
+    }
+    setUpNext(null);
+
+    const mode = m?.type === "intro" ? prefs.skipIntro : m?.type === "credits" ? prefs.skipCredits : "off";
+    const label = m?.type === "intro" ? "Skip intro" : "Skip credits";
+    if (mode === "auto" && !handledMarkers.current.has(i)) {
+      handledMarkers.current.add(i);
+      seekTo(m.endTimeOffset / 1000);
+      flash(m.type === "intro" ? "Skipped the intro" : "Skipped the credits");
+      setSkip(null);
+    } else if (mode !== "off") {
+      setSkip({ label, to: m.endTimeOffset / 1000 });
+    } else {
+      setSkip(null);
+    }
+  }, [time, info, prefs, buffering, seekTo, flash]);
+
+  // Up Next counts down while playing, then moves on.
+  useEffect(() => {
+    if (upNext?.countdown == null || paused) return;
+    if (upNext.countdown <= 0) {
+      finish();
+      return;
+    }
+    const t = window.setTimeout(() => setUpNext({ countdown: upNext.countdown! - 1 }), 1000);
+    return () => window.clearTimeout(t);
+  }, [upNext, paused, finish]);
 
   const toggleFullscreen = useCallback(async () => {
     const win = getCurrentWindow();
@@ -369,6 +458,57 @@ export function Player({ ratingKey, resume, onClose }: Props) {
       {notice && !error && (
         <div className="pointer-events-none absolute inset-x-0 top-24 flex justify-center px-6">
           <p className="max-w-lg rounded-xl bg-black/75 px-4 py-2.5 text-center text-sm text-white shadow-lg">{notice}</p>
+        </div>
+      )}
+
+      {skip && !upNext && !error && (
+        <Button
+          size="lg"
+          onClick={() => {
+            seekTo(skip.to);
+            setSkip(null);
+          }}
+          className={cn(
+            "absolute right-8 z-10 bg-white text-black shadow-lg transition-[bottom] duration-300 hover:bg-white/90",
+            controls ? "bottom-36" : "bottom-10",
+          )}
+        >
+          <ChevronsRight /> {skip.label}
+        </Button>
+      )}
+
+      {upNext && info && !error && (
+        <div
+          className={cn(
+            "absolute right-8 z-10 flex w-[27rem] gap-4 rounded-2xl border border-white/10 bg-black/85 p-4 text-white shadow-2xl backdrop-blur transition-[bottom] duration-300",
+            controls ? "bottom-36" : "bottom-10",
+          )}
+        >
+          {info.next?.thumb && (
+            <img
+              src={imageUrl(server, info.next.thumb, 160, 90)}
+              alt=""
+              className="aspect-video w-32 shrink-0 rounded-lg object-cover"
+            />
+          )}
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="min-w-0">
+              <div className="text-xs font-medium tracking-wide text-white/60 uppercase">
+                {info.next ? "Up next" : "Credits"}
+              </div>
+              <div className="truncate font-semibold">{info.next ? info.next.title : info.title}</div>
+              {info.next && <div className="truncate text-sm text-white/60">{info.next.subtitle}</div>}
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={finish}>
+                {info.next ? "Play now" : "Finish"}
+                {upNext.countdown != null && <span className="tabular-nums opacity-70">{upNext.countdown}</span>}
+              </Button>
+              <Button size="sm" variant="ghost" className="text-white hover:bg-white/10" onClick={() => setUpNext(null)}>
+                Keep watching
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

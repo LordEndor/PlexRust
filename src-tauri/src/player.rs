@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use plex::{Marker, TranscodeOptions};
+use plex::{Marker, Metadata, TranscodeOptions};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -16,6 +16,16 @@ pub struct Subtitle {
     url: String,
     title: String,
     language: Option<String>,
+}
+
+/// The episode to offer when this one's credits start.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextUp {
+    rating_key: String,
+    title: String,
+    subtitle: String,
+    thumb: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -38,6 +48,7 @@ pub struct PlaybackInfo {
     /// Set for profile 7 (UHD Blu-ray), whose enhancement layer mpv can't
     /// use and which otherwise can leave the screen black.
     strip_dolby_vision: bool,
+    next: Option<NextUp>,
 }
 
 /// mpv ships inside the installer under `mpv/`; in development fall back to
@@ -61,6 +72,15 @@ fn log_path(app: &AppHandle) -> String {
         .and_then(|d| std::fs::create_dir_all(&d).ok().map(|_| d.join("mpv.log")))
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+fn episode_label(item: &Metadata) -> String {
+    format!(
+        "{} · S{} · E{}",
+        item.grandparent_title.clone().unwrap_or_default(),
+        item.parent_index.unwrap_or_default(),
+        item.index.unwrap_or_default()
+    )
 }
 
 #[tauri::command]
@@ -102,13 +122,19 @@ pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_ke
         .any(|s| s.stream_type == Some(1) && s.dovi_profile == Some(7));
 
     let subtitle = match item.kind.as_str() {
-        "episode" => Some(format!(
-            "{} · S{} · E{}",
-            item.grandparent_title.clone().unwrap_or_default(),
-            item.parent_index.unwrap_or_default(),
-            item.index.unwrap_or_default()
-        )),
+        "episode" => Some(episode_label(&item)),
         _ => item.year.map(|y| y.to_string()),
+    };
+
+    // Missing next-episode info only costs the Up Next card, so errors are dropped.
+    let next = match item.kind.as_str() {
+        "episode" => state.plex.next_episode(&server, &item).await.ok().flatten().map(|n| NextUp {
+            subtitle: episode_label(&n),
+            rating_key: n.rating_key,
+            title: n.title,
+            thumb: n.thumb,
+        }),
+        _ => None,
     };
 
     Ok(PlaybackInfo {
@@ -123,6 +149,7 @@ pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_ke
         mpv_path: mpv_path(&app),
         log_path: log_path(&app),
         strip_dolby_vision,
+        next,
     })
 }
 

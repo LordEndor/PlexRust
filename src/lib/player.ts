@@ -19,6 +19,7 @@ export interface PlaybackInfo {
   mpvPath: string;
   logPath: string;
   stripDolbyVision: boolean;
+  next?: { ratingKey: string; title: string; subtitle: string; thumb?: string | null } | null;
 }
 
 export type PlaybackState = "playing" | "paused" | "stopped";
