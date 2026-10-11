@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { ChevronDown } from "lucide-react";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { ChevronDown, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
+import { errorMessage } from "@/lib/api";
 import { QUALITIES } from "@/lib/player";
 import { LANGUAGES, savePrefs, usePrefs, type SkipMode } from "@/lib/prefs";
 
@@ -75,9 +78,10 @@ export function SettingsView() {
         )}
 
         <Section title="About">
-          <Row label="PlexRust" hint="Updates install automatically when a new version is released.">
+          <Row label="PlexRust" hint="New versions are also checked for every time the app starts.">
             <span className="text-muted-foreground text-sm tabular-nums">{version && `v${version}`}</span>
           </Row>
+          <UpdateRow />
         </Section>
       </div>
     </div>
@@ -134,5 +138,70 @@ function Picker({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+type UpdateState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "current" }
+  | { kind: "available"; update: Update }
+  | { kind: "installing"; percent: number | null }
+  | { kind: "error"; message: string };
+
+function UpdateRow() {
+  const [state, setState] = useState<UpdateState>({ kind: "idle" });
+
+  async function checkNow() {
+    setState({ kind: "checking" });
+    try {
+      const update = await check();
+      setState(update ? { kind: "available", update } : { kind: "current" });
+    } catch (e) {
+      setState({ kind: "error", message: errorMessage(e) });
+    }
+  }
+
+  async function install(update: Update) {
+    let total = 0;
+    let done = 0;
+    setState({ kind: "installing", percent: null });
+    try {
+      await update.downloadAndInstall((ev) => {
+        if (ev.event === "Started") total = ev.data.contentLength ?? 0;
+        if (ev.event === "Progress") {
+          done += ev.data.chunkLength;
+          if (total) setState({ kind: "installing", percent: Math.round((done / total) * 100) });
+        }
+      });
+      await relaunch();
+    } catch (e) {
+      setState({ kind: "error", message: errorMessage(e) });
+    }
+  }
+
+  const hint = {
+    idle: "See whether a newer version has been released.",
+    checking: "Checking GitHub for a newer version…",
+    current: "You're on the latest version.",
+    available: state.kind === "available" ? `Version ${state.update.version} is available.` : "",
+    installing:
+      state.kind === "installing" && state.percent != null
+        ? `Downloading… ${state.percent}%. The app restarts when it's done.`
+        : "Downloading… The app restarts when it's done.",
+    error: state.kind === "error" ? `Couldn't check for updates: ${state.message}` : "",
+  }[state.kind];
+
+  return (
+    <Row label="Updates" hint={hint}>
+      {state.kind === "available" ? (
+        <Button onClick={() => install(state.update)}>Update and restart</Button>
+      ) : (
+        <Button variant="outline" onClick={checkNow} disabled={state.kind === "checking" || state.kind === "installing"}>
+          {(state.kind === "checking" || state.kind === "installing") && <Loader2 className="animate-spin" />}
+          Check for updates
+        </Button>
+      )}
+    </Row>
   );
 }
