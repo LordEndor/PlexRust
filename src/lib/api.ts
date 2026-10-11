@@ -1,5 +1,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
+import { webImageUrl } from "@/web/plex";
+
 export interface User {
   id: number;
   uuid: string;
@@ -157,11 +159,15 @@ export const library = {
 /**
  * URL for a Plex image, resized on the server to the size it is shown at.
  * It points at the app's `plximg` protocol: Rust fetches and caches the image,
- * so the page never connects to the Plex server or sees the token.
+ * so the page never connects to the Plex server or sees the token. The
+ * browser version has no Rust side, so it asks Plex directly.
  */
 export function imageUrl(server: ServerConnection, path: string | null | undefined, width: number, height: number) {
   if (!path) return undefined;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (import.meta.env.MODE === "web") {
+    return webImageUrl(server, path, Math.round(width * dpr), Math.round(height * dpr));
+  }
   const params = new URLSearchParams({
     s: server.machineId,
     w: String(Math.round(width * dpr)),

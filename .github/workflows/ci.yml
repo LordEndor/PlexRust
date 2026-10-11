@@ -13,6 +13,9 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
+    # Pull request builds only need to read the repo.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 

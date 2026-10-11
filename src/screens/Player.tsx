@@ -13,9 +13,11 @@ import {
 import {
   ArrowLeft,
   AudioLines,
+  Check,
   ChevronsRight,
   Captions,
   Gauge,
+  ListOrdered,
   ListVideo,
   Loader2,
   Maximize,
@@ -24,6 +26,8 @@ import {
   Play,
   RotateCcw,
   RotateCw,
+  SkipBack,
+  SkipForward,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -45,6 +49,7 @@ import {
   playback,
   previewUrl,
   QUALITIES,
+  type Episode,
   type PlaybackInfo,
   type PlaybackState,
   type Quality,
@@ -484,6 +489,11 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
       poke();
       // Keys inside an open menu navigate or close the menu, not the player.
       if (document.querySelector('[role="menu"]')) return;
+      if (e.shiftKey && (e.key === "N" || e.key === "P")) {
+        const to = e.key === "N" ? live.current.info?.next : live.current.info?.previous;
+        if (to) onPlayNext(to.ratingKey);
+        return;
+      }
       switch (e.key) {
         case " ":
         case "k":
@@ -521,11 +531,13 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [poke, togglePause, seekBy, toggleFullscreen, onClose]);
+  }, [poke, togglePause, seekBy, toggleFullscreen, onClose, onPlayNext]);
 
   const audio = tracks.filter((t) => t.type === "audio");
   const subs = tracks.filter((t) => t.type === "sub");
   const total = duration || (info?.durationMs ?? 0) / 1000;
+  // Episodes get previous and next buttons, even at either end of the show.
+  const episodes = !!(info?.previous || info?.queue.length);
   const chapters: Chapter[] = info?.chapters.length
     ? info.chapters.map((c, i) => ({ title: c.tag || `Chapter ${(c.index ?? i) + 1}`, start: c.startTimeOffset / 1000 }))
     : fileChapters;
@@ -666,6 +678,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
         <div className="pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col gap-3 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pt-20 pb-5">
           <SeekBar time={time} duration={total} onSeek={seekTo} chapters={chapters} previews={previews} />
           <div className="flex items-center gap-1 text-white">
+            {episodes && (
+              <IconButton
+                title="Previous episode (Shift+P)"
+                disabled={!info?.previous}
+                onClick={() => info?.previous && onPlayNext(info.previous.ratingKey)}
+              >
+                <SkipBack className="fill-current" />
+              </IconButton>
+            )}
             <IconButton title="Back 10s (←)" onClick={() => seekBy(-10)}>
               <RotateCcw />
             </IconButton>
@@ -675,6 +696,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
             <IconButton title="Forward 10s (→)" onClick={() => seekBy(10)}>
               <RotateCw />
             </IconButton>
+            {episodes && (
+              <IconButton
+                title="Next episode (Shift+N)"
+                disabled={!info?.next}
+                onClick={() => info?.next && onPlayNext(info.next.ratingKey)}
+              >
+                <SkipForward className="fill-current" />
+              </IconButton>
+            )}
             <span className="ml-3 text-sm text-white/80 tabular-nums">
               {formatTime(time)} / {formatTime(total)}
             </span>
@@ -697,6 +727,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
               title="Volume (↑/↓)"
             />
 
+            {info && info.queue.length > 0 && (
+              <QueueMenu queue={info.queue} onPlay={(ep) => onPlayNext(ep.ratingKey)} />
+            )}
             {chapters.length > 1 && <ChapterMenu chapters={chapters} time={time} previews={previews} onSeek={seekTo} />}
             <TrackMenu icon={<AudioLines />} title="Audio" tracks={audio} onPick={(id) => pickTrack("audio", id)} />
             <TrackMenu icon={<Captions />} title="Subtitles" tracks={subs} allowOff onPick={(id) => pickTrack("sub", id)} />
@@ -731,11 +764,13 @@ function IconButton({
   title,
   onClick,
   big,
+  disabled,
 }: {
   children: React.ReactNode;
   title: string;
   onClick: () => void;
   big?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Button
@@ -743,6 +778,7 @@ function IconButton({
       size="icon"
       title={title}
       onClick={onClick}
+      disabled={disabled}
       className={cn("text-white hover:bg-white/10", big && "size-11 [&_svg:not([class*='size-'])]:size-6")}
     >
       {children}
@@ -808,6 +844,39 @@ function chapterAt(chapters: Chapter[], secs: number) {
 
 function previewFrame(previews: Previews, secs: number) {
   return previewUrl(previews.partId, Math.min(previews.count - 1, Math.floor((secs * 1000) / previews.intervalMs)));
+}
+
+function QueueMenu({ queue, onPlay }: { queue: Episode[]; onPlay: (ep: Episode) => void }) {
+  const { server } = useNav();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" title="Up next" className="text-white hover:bg-white/10">
+          <ListOrdered />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top" className="max-h-[60vh] w-96 overflow-y-auto">
+        <DropdownMenuLabel>Up next</DropdownMenuLabel>
+        {queue.map((ep) => (
+          <DropdownMenuCheckItem key={ep.ratingKey} onSelect={() => onPlay(ep)} className="gap-3 pl-2">
+            <img
+              src={imageUrl(server, ep.thumb, 112, 63)}
+              alt=""
+              className="bg-muted aspect-video w-28 shrink-0 rounded object-cover"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{ep.title}</div>
+              <div className="text-muted-foreground truncate text-xs">
+                {ep.subtitle}
+                {ep.durationMs ? ` · ${Math.round(ep.durationMs / 60000)} min` : ""}
+              </div>
+            </div>
+            {ep.watched && <Check className="text-muted-foreground size-4 shrink-0" aria-label="Watched" />}
+          </DropdownMenuCheckItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 function ChapterMenu({

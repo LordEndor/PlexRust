@@ -4,6 +4,13 @@ A fast Plex player for Windows, in the spirit of Infuse. The core (Plex API,
 playback control, settings) is Rust; the interface is React with
 [shadcn/ui](https://ui.shadcn.com) running in [Tauri 2](https://tauri.app).
 
+> [!WARNING]
+> This project is vibe coded, built with AI assistance for my own personal use.
+> You're welcome to use it and to send feedback or open issues, but please read
+> through the code before you install it. It signs in to your Plex account and
+> stores your Plex token on disk, so make sure you're comfortable with what it
+> does. It comes with no warranty or support.
+
 ![Home](docs/home.png)
 
 ## Status
@@ -52,3 +59,24 @@ Releases are signed with the updater key: its public half is in
 `src-tauri/tauri.conf.json`, the private half is the
 `TAURI_SIGNING_PRIVATE_KEY` repository secret. Lose the private key and
 installed copies can no longer update, so keep a backup of it.
+
+## Browser version
+
+For computers where you can't install the app, the same UI also builds as a
+web page: `pnpm build:web` (or `pnpm dev:web`). Every merge to `main`
+publishes it to GitHub Pages via `.github/workflows/pages.yml`, at
+<https://lordendor.github.io/PlexRust/>.
+
+The browser build swaps the Tauri APIs and the mpv player for the stand-ins in
+`src/web` (see the aliases in `vite.config.ts`); every other screen is shared.
+It differs from the desktop app in a few ways:
+
+- The page talks to plex.tv and the server itself, over the server's
+  `*.plex.direct` HTTPS addresses. The token and settings live in the
+  browser's local storage; sign out on shared computers.
+- Video always goes through Plex's transcoder as HLS (H.264 and AAC, played
+  with hls.js). H.264 files are only repackaged; anything else, including 4K
+  HDR, is re-encoded by the server at up to 1080p. Subtitles are burned in.
+- Skip intro/credits, Up Next and progress sync work the same way.
+- Chrome and Edge ask once for permission to reach devices on your local
+  network the first time the page talks to a server at home.

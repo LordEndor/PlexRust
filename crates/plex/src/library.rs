@@ -334,25 +334,22 @@ impl PlexClient {
         Ok(c.metadata)
     }
 
-    /// The episode after `episode`: the next one in its season, otherwise the
-    /// first episode of the following season.
-    pub async fn next_episode(&self, server: &ServerConnection, episode: &Metadata) -> Result<Option<Metadata>> {
-        let (Some(season), Some(index)) = (&episode.parent_rating_key, episode.index) else {
-            return Ok(None);
+    /// The episodes around `episode` in its show: the one before it and
+    /// every one after it, in season and episode order. Specials only count
+    /// when `episode` is itself a special.
+    pub async fn episode_neighbours(
+        &self,
+        server: &ServerConnection,
+        episode: &Metadata,
+    ) -> Result<(Option<Metadata>, Vec<Metadata>)> {
+        let Some(show) = &episode.grandparent_rating_key else {
+            return Ok((None, Vec::new()));
         };
-        let episodes = self.children(server, season).await?;
-        if let Some(next) = first_after(&episodes, index) {
-            return Ok(Some(next.clone()));
-        }
-        let (Some(show), Some(season_index)) = (&episode.grandparent_rating_key, episode.parent_index) else {
-            return Ok(None);
-        };
-        let seasons = self.children(server, show).await?;
-        let Some(next_season) = first_after(&seasons, season_index) else {
-            return Ok(None);
-        };
-        let episodes = self.children(server, &next_season.rating_key).await?;
-        Ok(first_after(&episodes, i32::MIN).cloned())
+        let all = self
+            .container(server, &format!("/library/metadata/{show}/allLeaves"), &[])
+            .await?
+            .metadata;
+        Ok(neighbours(all, episode))
     }
 
     pub async fn search(&self, server: &ServerConnection, query: &str) -> Result<Vec<Hub>> {
@@ -364,11 +361,16 @@ impl PlexClient {
 }
 
 /// The item with the lowest `index` above `after`.
-fn first_after(items: &[Metadata], after: i32) -> Option<&Metadata> {
-    items
-        .iter()
-        .filter(|m| m.index.is_some_and(|i| i > after))
-        .min_by_key(|m| m.index)
+fn neighbours(mut all: Vec<Metadata>, episode: &Metadata) -> (Option<Metadata>, Vec<Metadata>) {
+    let specials = episode.parent_index == Some(0);
+    all.retain(|m| (m.parent_index == Some(0)) == specials);
+    all.sort_by_key(|m| (m.parent_index, m.index));
+    let Some(at) = all.iter().position(|m| m.rating_key == episode.rating_key) else {
+        return (None, Vec::new());
+    };
+    let after = all.split_off(at + 1);
+    all.pop();
+    (all.pop(), after)
 }
 
 #[cfg(test)]
@@ -412,12 +414,27 @@ mod tests {
     }
 
     #[test]
-    fn first_after_picks_the_next_index() {
-        let item = |key: &str, index| Metadata { rating_key: key.into(), index: Some(index), ..Default::default() };
-        let items = [item("a", 3), item("b", 1), item("c", 2)];
-        assert_eq!(first_after(&items, 1).unwrap().rating_key, "c");
-        assert_eq!(first_after(&items, i32::MIN).unwrap().rating_key, "b");
-        assert!(first_after(&items, 3).is_none());
+    fn neighbours_cross_seasons_and_skip_specials() {
+        let ep = |key: &str, season, index| Metadata {
+            rating_key: key.into(),
+            parent_index: Some(season),
+            index: Some(index),
+            ..Default::default()
+        };
+        let all = vec![ep("s2e1", 2, 1), ep("x1", 0, 1), ep("s1e2", 1, 2), ep("s1e1", 1, 1), ep("s2e2", 2, 2)];
+        let keys = |v: &[Metadata]| v.iter().map(|m| m.rating_key.clone()).collect::<Vec<_>>();
+
+        let (prev, after) = neighbours(all.clone(), &ep("s1e2", 1, 2));
+        assert_eq!(prev.unwrap().rating_key, "s1e1");
+        assert_eq!(keys(&after), ["s2e1", "s2e2"]);
+
+        let (prev, after) = neighbours(all.clone(), &ep("s1e1", 1, 1));
+        assert!(prev.is_none());
+        assert_eq!(after.len(), 3);
+
+        let (prev, after) = neighbours(all, &ep("s2e2", 2, 2));
+        assert_eq!(prev.unwrap().rating_key, "s2e1");
+        assert!(after.is_empty());
     }
 
     #[test]
