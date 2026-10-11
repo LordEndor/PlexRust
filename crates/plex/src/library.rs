@@ -54,6 +54,22 @@ pub struct Metadata {
     pub role: Vec<Tag>,
     #[serde(rename = "Media")]
     pub media: Vec<Media>,
+    /// Intro and credits markers (needs `includeMarkers=1`).
+    #[serde(rename = "Marker")]
+    pub markers: Vec<Marker>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Marker {
+    /// `intro` or `credits`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Milliseconds.
+    pub start_time_offset: u64,
+    pub end_time_offset: u64,
+    #[serde(rename = "final")]
+    pub is_final: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -73,6 +89,38 @@ pub struct Media {
     pub audio_codec: Option<String>,
     pub audio_channels: Option<u32>,
     pub container: Option<String>,
+    #[serde(rename = "Part")]
+    pub part: Vec<Part>,
+}
+
+/// One file of a media version.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Part {
+    pub id: Option<u64>,
+    /// Server path that streams the file, e.g. `/library/parts/12/1700000000/file.mkv`.
+    pub key: Option<String>,
+    pub file: Option<String>,
+    pub size: Option<u64>,
+    pub container: Option<String>,
+    #[serde(rename = "Stream")]
+    pub stream: Vec<Stream>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Stream {
+    pub id: Option<u64>,
+    /// 1 video, 2 audio, 3 subtitle.
+    pub stream_type: Option<u8>,
+    pub codec: Option<String>,
+    pub language: Option<String>,
+    pub language_code: Option<String>,
+    pub display_title: Option<String>,
+    pub title: Option<String>,
+    /// Set for subtitles stored next to the video rather than inside it.
+    pub key: Option<String>,
+    pub forced: Option<bool>,
 }
 
 /// A row of items, as shown on the home screen or in search results.
@@ -163,7 +211,7 @@ impl PlexClient {
     /// Full details for one item, including cast, genres and media info.
     pub async fn metadata(&self, server: &ServerConnection, rating_key: &str) -> Result<Option<Metadata>> {
         let c = self
-            .container(server, &format!("/library/metadata/{rating_key}"), &[])
+            .container(server, &format!("/library/metadata/{rating_key}"), &[("includeMarkers", "1")])
             .await?;
         Ok(c.metadata.into_iter().next())
     }

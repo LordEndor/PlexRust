@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { HomeView } from "@/screens/HomeView";
 import { ItemView } from "@/screens/ItemView";
 import { LibraryView } from "@/screens/LibraryView";
+import { Player } from "@/screens/Player";
 import { SearchView } from "@/screens/SearchView";
 
 const sectionIcon = { movie: Film, show: Tv, artist: Music, photo: Image } as const;
@@ -74,6 +75,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   useEffect(() => {
     const onMouse = (e: MouseEvent) => e.button === 3 && back();
     const onKey = (e: KeyboardEvent) => {
+      if (document.documentElement.classList.contains("playing")) return;
       const typing = e.target instanceof HTMLInputElement;
       if ((e.altKey && e.key === "ArrowLeft") || (e.key === "Backspace" && !typing) || (e.key === "Escape" && !typing)) back();
     };
@@ -95,6 +97,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
 
   const nav = useMemo<Nav>(() => ({ server, navigate, back }), [server, navigate, back]);
   const root = stack[0];
+  const top = stack[stack.length - 1];
   const video = sections?.filter((s) => s.type === "movie" || s.type === "show");
 
   return (
@@ -149,12 +152,15 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
           {error && <p className="text-destructive px-8 pt-4 text-sm">{error}</p>}
 
           <main className="relative min-h-0 flex-1">
-            {stack.map((route, i) => (
-              <div key={`${i}:${routeKey(route)}`} className={cn("absolute inset-0", i !== stack.length - 1 && "hidden")}>
-                <Screen route={route} />
-              </div>
-            ))}
+            {stack.map((route, i) =>
+              route.name === "player" ? null : (
+                <div key={`${i}:${routeKey(route)}`} className={cn("absolute inset-0", route !== top && "hidden")}>
+                  <Screen route={route} />
+                </div>
+              ),
+            )}
           </main>
+          {top.name === "player" && <Player ratingKey={top.ratingKey} resume={top.resume} onClose={back} />}
         </div>
       </div>
     </NavContext.Provider>
@@ -171,6 +177,8 @@ function Screen({ route }: { route: Route }) {
       return <ItemView ratingKey={route.ratingKey} />;
     case "search":
       return <SearchView query={route.query} />;
+    case "player":
+      return null;
   }
 }
 

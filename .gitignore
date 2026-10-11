@@ -19,3 +19,7 @@ src-tauri/gen/schemas
 !.vscode/extensions.json
 .idea
 .DS_Store
+
+# mpv binaries are downloaded by CI
+src-tauri/mpv/*
+!src-tauri/mpv/README.txt

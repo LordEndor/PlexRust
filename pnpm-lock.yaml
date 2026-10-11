@@ -50,6 +50,9 @@ importers:
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
+      tauri-plugin-mpv-api:
+        specifier: 0.5.2
+        version: 0.5.2
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
@@ -997,6 +1000,9 @@ packages:
   '@tauri-apps/api@2.12.3':
     resolution: {integrity: sha512-9s0PKw0p4r3kFq92jhpivYSp+cSht15o0gXpZxuQd0+dV9KCexEVkNaLELVoLdJWyoH4KlfQo5h3W2LIM8siJg==}
 
+  '@tauri-apps/api@2.8.0':
+    resolution: {integrity: sha512-ga7zdhbS2GXOMTIZRT0mYjKJtR9fivsXzsyq5U3vjDL0s6DTMwYRm0UHNjzTY5dh4+LSC68Sm/7WEiimbQNYlw==}
+
   '@tauri-apps/cli-darwin-arm64@2.12.2':
     resolution: {integrity: sha512-Lk3zaBTfzNvA7670Al5PNgo2M/95uaDPe1yp+ILJeDOmol87XiYuK5E5+FUbK5e6U6OORx9qpZdOo2U+5tETtQ==}
     engines: {node: '>= 10'}
@@ -1395,6 +1401,10 @@ packages:
   tapable@2.3.3:
     resolution: {integrity: sha512-uxc/zpqFg6x7C8vOE7lh6Lbda8eEL9zmVm/PLeTPBRhh1xCgdWaQ+J1CUieGpIfm2HdtsUpRv+HshiasBMcc6A==}
     engines: {node: '>=6'}
+
+  tauri-plugin-mpv-api@0.5.2:
+    resolution: {integrity: sha512-SGUqxD82q5Zcm+0iQxz5gpnic6kscH9YVWVc9VoAeS+OpbmX5FX25qCTHUUlmrsWQyNoTAVij+wTlSjiAmEPUw==}
+    engines: {node: '>=18.0.0'}
 
   tinyglobby@0.2.17:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
@@ -2393,6 +2403,8 @@ snapshots:
 
   '@tauri-apps/api@2.12.3': {}
 
+  '@tauri-apps/api@2.8.0': {}
+
   '@tauri-apps/cli-darwin-arm64@2.12.2':
     optional: true
 
@@ -2750,6 +2762,10 @@ snapshots:
   tailwindcss@4.3.3: {}
 
   tapable@2.3.3: {}
+
+  tauri-plugin-mpv-api@0.5.2:
+    dependencies:
+      '@tauri-apps/api': 2.8.0
 
   tinyglobby@0.2.17:
     dependencies:

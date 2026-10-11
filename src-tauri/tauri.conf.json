@@ -19,7 +19,7 @@
         "minWidth": 960,
         "minHeight": 600,
         "center": true,
-        "backgroundColor": "#09090b"
+        "transparent": true
       }
     ],
     "security": {
@@ -39,7 +39,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "resources": {
+      "mpv/": "mpv/"
+    }
   },
   "plugins": {
     "updater": {

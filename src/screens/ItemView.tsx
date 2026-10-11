@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Play, Star } from "lucide-react";
+import { Check, Play, RotateCcw, Star } from "lucide-react";
 
 import { Poster, ProgressBar } from "@/components/Poster";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, imageUrl, library, type Metadata } from "@/lib/api";
 import { formatDuration, isWatched, progress, resolutionLabel } from "@/lib/format";
 import { useNav } from "@/lib/nav";
+import { formatTime } from "@/lib/player";
 
 export function ItemView({ ratingKey }: { ratingKey: string }) {
   const [item, setItem] = useState<Metadata | null>(null);
@@ -128,13 +129,17 @@ function Hero({ item }: { item: Metadata }) {
           {item.summary && <p className="text-muted-foreground line-clamp-4 max-w-3xl text-sm leading-relaxed">{item.summary}</p>}
           {(item.type === "movie" || item.type === "episode") && (
             <div className="flex items-center gap-3">
-              <Button size="lg" disabled title="The player arrives in the next update">
-                <Play className="fill-current" /> {resumable ? "Resume" : "Play"}
+              <Button size="lg" onClick={() => navigate({ name: "player", ratingKey: item.ratingKey, resume: resumable })}>
+                <Play className="fill-current" /> {resumable ? `Resume from ${formatTime((item.viewOffset ?? 0) / 1000)}` : "Play"}
               </Button>
               {resumable && (
-                <div className="bg-muted relative h-1.5 w-40 overflow-hidden rounded-full">
-                  <div className="bg-primary h-full" style={{ width: `${progress(item) * 100}%` }} />
-                </div>
+                <Button
+                  size="lg"
+                  variant="secondary"
+                  onClick={() => navigate({ name: "player", ratingKey: item.ratingKey, resume: false })}
+                >
+                  <RotateCcw /> From the start
+                </Button>
               )}
             </div>
           )}

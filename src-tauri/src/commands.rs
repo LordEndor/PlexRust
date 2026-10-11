@@ -6,9 +6,9 @@ use tauri::State;
 
 use crate::AppState;
 
-type CmdResult<T> = Result<T, String>;
+pub(crate) type CmdResult<T> = Result<T, String>;
 
-fn err(e: impl std::fmt::Display) -> String {
+pub(crate) fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
@@ -126,7 +126,7 @@ pub async fn select_server(state: State<'_, AppState>, machine_id: String) -> Cm
     Ok(conn)
 }
 
-async fn current_server(state: &AppState) -> CmdResult<ServerConnection> {
+pub(crate) async fn current_server(state: &AppState) -> CmdResult<ServerConnection> {
     state
         .settings
         .lock()
