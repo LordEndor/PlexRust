@@ -1,0 +1,38 @@
+# PlexRust
+
+A fast Plex player for Windows, in the spirit of Infuse. The core (Plex API,
+playback control, settings) is Rust; the interface is React with
+[shadcn/ui](https://ui.shadcn.com) running in [Tauri 2](https://tauri.app).
+
+![Home](docs/home.png)
+
+## Status
+
+- [x] Sign in with Plex (plex.tv PIN, approved in the browser)
+- [x] Server discovery, picking the fastest connection (local, then remote, then relay)
+- [x] Library list
+- [ ] Library browsing: home rows, posters, show/season/episode pages, search
+- [ ] Player: embedded libmpv, direct play 4K HDR, transcode fallback, track picker, progress sync
+- [ ] Auto-skip intros and credits from Plex markers, settings page
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| `crates/plex` | Async client for plex.tv and Plex Media Server. No Tauri dependency, unit tested. |
+| `src-tauri` | The Tauri app: commands the UI calls, persisted settings. |
+| `src` | React UI. `components/ui` holds shadcn/ui components. |
+
+Settings (including the Plex token) are stored in
+`%APPDATA%\com.lordendor.plexrust\settings.json`.
+
+## Developing on Windows
+
+1. Install [Rust](https://rustup.rs), [Node.js 22+](https://nodejs.org) and
+   pnpm (`npm i -g pnpm`). WebView2 ships with Windows 11.
+2. `pnpm install`
+3. `pnpm tauri dev` runs the app with hot reload.
+4. `pnpm tauri build` produces an installer under `target/release/bundle`.
+
+Every push also builds the installer in GitHub Actions; download it from the
+run's **Artifacts**.

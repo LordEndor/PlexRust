@@ -1,0 +1,56 @@
+mod commands;
+mod settings;
+
+use std::path::PathBuf;
+
+use plex::{ClientInfo, PlexClient};
+use settings::Settings;
+use tauri::Manager;
+use tokio::sync::Mutex;
+
+pub struct AppState {
+    pub plex: PlexClient,
+    pub settings: Mutex<Settings>,
+    pub settings_path: PathBuf,
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let settings_path = app.path().app_config_dir()?.join("settings.json");
+            let settings = Settings::load(&settings_path);
+            settings.save(&settings_path)?;
+            let plex = PlexClient::new(ClientInfo {
+                client_id: settings.client_id.clone(),
+                product: "PlexRust".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                platform: "Windows".into(),
+                device_name: hostname(),
+            })?;
+            app.manage(AppState {
+                plex,
+                settings: Mutex::new(settings),
+                settings_path,
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::get_session,
+            commands::auth_start,
+            commands::auth_wait,
+            commands::sign_out,
+            commands::list_servers,
+            commands::select_server,
+            commands::library_sections,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+fn hostname() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "PlexRust".into())
+}
