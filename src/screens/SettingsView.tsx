@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, Eye, EyeOff, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,9 +13,19 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
-import { errorMessage } from "@/lib/api";
+import { errorMessage, library, type Hub } from "@/lib/api";
 import { QUALITIES } from "@/lib/player";
-import { LANGUAGES, savePrefs, usePrefs, type SkipMode } from "@/lib/prefs";
+import {
+  ACCENTS,
+  arrangeHubs,
+  LANGUAGES,
+  POSTER_SIZES,
+  savePrefs,
+  usePrefs,
+  type Prefs,
+  type SkipMode,
+} from "@/lib/prefs";
+import { cn } from "@/lib/utils";
 
 const SKIP_OPTIONS: { value: SkipMode; label: string }[] = [
   { value: "auto", label: "Automatically" },
@@ -73,6 +83,49 @@ export function SettingsView() {
                   onChange={(v) => savePrefs({ subtitleLanguage: v })}
                 />
               </Row>
+            </Section>
+
+            <Section title="Appearance">
+              <Row label="Accent color" hint="Used for buttons, progress bars and highlights.">
+                <div className="flex gap-2">
+                  {ACCENTS.map((a) => (
+                    <button
+                      key={a.key}
+                      title={a.label}
+                      aria-label={a.label}
+                      onClick={() => savePrefs({ accent: a.key })}
+                      className={cn(
+                        "ring-offset-card grid size-7 place-items-center rounded-full ring-offset-2 transition-transform hover:scale-110",
+                        prefs.accent === a.key && "ring-2 ring-white/80",
+                      )}
+                      style={{ background: a.color }}
+                    >
+                      {prefs.accent === a.key && <Check className="size-4 text-black/80" />}
+                    </button>
+                  ))}
+                </div>
+              </Row>
+              <Row label="Poster size" hint="For Home rows, libraries and seasons.">
+                <Segmented
+                  value={prefs.posterSize}
+                  options={POSTER_SIZES.map((s) => ({ value: s.key, label: s.label }))}
+                  onChange={(v) => savePrefs({ posterSize: v })}
+                />
+              </Row>
+            </Section>
+
+            <Section title="Home" description="Pick which rows Home shows, and in what order.">
+              <Row label="Featured banner" hint="Recently added movies and shows, rotating at the top of Home.">
+                <Segmented
+                  value={prefs.showFeatured ? "on" : "off"}
+                  options={[
+                    { value: "on", label: "On" },
+                    { value: "off", label: "Off" },
+                  ]}
+                  onChange={(v) => savePrefs({ showFeatured: v === "on" })}
+                />
+              </Row>
+              <HomeRows prefs={prefs} />
             </Section>
           </>
         )}
@@ -138,6 +191,93 @@ function Picker({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Home rows with show/hide and move up/down. Rows come from the server, so they match what Home shows. */
+function HomeRows({ prefs }: { prefs: Prefs }) {
+  const [hubs, setHubs] = useState<Hub[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    library
+      .homeHubs()
+      .then(setHubs)
+      .catch((e) => setError(errorMessage(e)));
+  }, []);
+
+  if (error) return <div className="text-destructive px-5 py-4 text-sm">Couldn't load the Home rows: {error}</div>;
+  if (!hubs) return <Skeleton className="m-5 h-24" />;
+
+  const rows = arrangeHubs(hubs, prefs, true);
+  const ids = rows.map((h) => h.hubIdentifier);
+
+  function move(i: number, by: -1 | 1) {
+    const order = ids.slice();
+    [order[i], order[i + by]] = [order[i + by], order[i]];
+    // Keep rows that aren't on this server right now where they were.
+    savePrefs({ hubOrder: [...order, ...prefs.hubOrder.filter((id) => !order.includes(id))] });
+  }
+
+  function toggle(id: string) {
+    const hidden = prefs.hiddenHubs.includes(id);
+    savePrefs({ hiddenHubs: hidden ? prefs.hiddenHubs.filter((h) => h !== id) : [...prefs.hiddenHubs, id] });
+  }
+
+  return (
+    <>
+      {rows.map((h, i) => {
+        const hidden = prefs.hiddenHubs.includes(h.hubIdentifier);
+        return (
+          <div key={h.hubIdentifier} className="flex items-center gap-2 px-5 py-2.5">
+            <span className={cn("flex-1 truncate text-sm", hidden && "text-muted-foreground line-through")}>
+              {h.title}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              disabled={i === 0}
+              onClick={() => move(i, -1)}
+              aria-label="Move up"
+            >
+              <ArrowUp />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              disabled={i === rows.length - 1}
+              onClick={() => move(i, 1)}
+              aria-label="Move down"
+            >
+              <ArrowDown />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              onClick={() => toggle(h.hubIdentifier)}
+              aria-label={hidden ? "Show row" : "Hide row"}
+              title={hidden ? "Show row" : "Hide row"}
+            >
+              {hidden ? <EyeOff className="text-muted-foreground" /> : <Eye />}
+            </Button>
+          </div>
+        );
+      })}
+      {(prefs.hubOrder.length > 0 || prefs.hiddenHubs.length > 0) && (
+        <div className="px-5 py-2.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => savePrefs({ hubOrder: [], hiddenHubs: [] })}
+          >
+            Reset to Plex's order
+          </Button>
+        </div>
+      )}
+    </>
   );
 }
 

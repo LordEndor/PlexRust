@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { api, type Session } from "@/lib/api";
+import { useAccent } from "@/lib/prefs";
 import { SignIn } from "@/screens/SignIn";
 import { ServerPicker } from "@/screens/ServerPicker";
 import { Home } from "@/screens/Home";
@@ -9,6 +10,7 @@ import { Home } from "@/screens/Home";
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [picking, setPicking] = useState(false);
+  useAccent();
 
   useEffect(() => {
     api.getSession().then((s) => {

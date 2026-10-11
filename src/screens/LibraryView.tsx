@@ -14,10 +14,10 @@ import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLibraryChanged } from "@/lib/changes";
 import { errorMessage, library, type FilterValue, type Filters, type LibrarySection, type Metadata } from "@/lib/api";
+import { posterSize, usePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 
 const PAGE = 120;
-const MIN_COL = 160;
 const GAP = 20;
 const CAPTION = 44;
 
@@ -85,6 +85,7 @@ function CollectionsGrid({
   collections: Metadata[];
   toggle: React.ReactNode;
 }) {
+  const prefs = usePrefs();
   return (
     <div className="h-full overflow-y-auto px-8 pb-8">
       <header className="bg-background/95 sticky top-0 z-10 -mx-8 mb-4 flex items-center gap-3 px-8 py-4 backdrop-blur">
@@ -94,7 +95,10 @@ function CollectionsGrid({
         </h1>
         {toggle}
       </header>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-5">
+      <div
+        className="grid gap-5"
+        style={{ gridTemplateColumns: `repeat(auto-fill,minmax(${posterSize(prefs).poster}px,1fr))` }}
+      >
         {collections.map((c) => (
           <Poster key={c.ratingKey} item={c} />
         ))}
@@ -179,8 +183,9 @@ function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React
     loadPage(0);
   }, [loadPage]);
 
-  const cols = Math.max(2, Math.floor((width + GAP) / (MIN_COL + GAP)));
-  const colWidth = width > 0 ? (width - GAP * (cols - 1)) / cols : MIN_COL;
+  const minCol = posterSize(usePrefs()).poster;
+  const cols = Math.max(2, Math.floor((width + GAP) / (minCol + GAP)));
+  const colWidth = width > 0 ? (width - GAP * (cols - 1)) / cols : minCol;
   const rowHeight = colWidth * 1.5 + CAPTION + GAP;
   const rows = Math.ceil((total ?? 0) / cols);
 

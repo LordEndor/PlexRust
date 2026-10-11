@@ -5,11 +5,15 @@ import { HubRow } from "@/components/HubRow";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, library, type Hub } from "@/lib/api";
 import { useLibraryChanged } from "@/lib/changes";
+import { arrangeHubs, posterSize, usePrefs } from "@/lib/prefs";
 
 export function HomeView() {
   const [hubs, setHubs] = useState<Hub[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const featured = useMemo(() => (hubs ? featuredItems(hubs) : []), [hubs]);
+  const prefs = usePrefs();
+  const featured = useMemo(() => (hubs && prefs?.showFeatured !== false ? featuredItems(hubs) : []), [hubs, prefs]);
+  const rows = useMemo(() => (hubs ? arrangeHubs(hubs, prefs) : null), [hubs, prefs]);
+  const width = posterSize(prefs).poster;
 
   const load = useCallback(() => {
     library
@@ -37,13 +41,13 @@ export function HomeView() {
             <Skeleton className="h-6 w-48" />
             <div className="flex gap-4">
               {Array.from({ length: 7 }, (_, j) => (
-                <Skeleton key={j} className="aspect-[2/3] w-40 shrink-0 rounded-xl" />
+                <Skeleton key={j} className="aspect-[2/3] shrink-0 rounded-xl" style={{ width }} />
               ))}
             </div>
           </div>
         ))}
       {hubs?.length === 0 && !error && <p className="text-muted-foreground text-sm">Nothing here yet.</p>}
-      {hubs?.map((h) => (
+      {rows?.map((h) => (
         <HubRow key={h.hubIdentifier} hub={h} />
       ))}
     </div>
