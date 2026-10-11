@@ -11,7 +11,17 @@ export default function App() {
   const [picking, setPicking] = useState(false);
 
   useEffect(() => {
-    api.getSession().then(setSession);
+    api.getSession().then((s) => {
+      setSession(s);
+      // Re-pick the best address in the background: the saved one may be
+      // stale, or worse than what's reachable now.
+      if (s.user && s.server) {
+        api
+          .selectServer(s.server.machineId)
+          .then((server) => setSession((cur) => (cur?.server?.machineId === server.machineId ? { ...cur, server } : cur)))
+          .catch(() => {});
+      }
+    });
   }, []);
 
   if (!session) {

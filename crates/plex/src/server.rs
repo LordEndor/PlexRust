@@ -56,7 +56,7 @@ impl PlexClient {
             .zip(join_all(probes).await)
             .filter_map(|(c, r)| r.map(|d| (c, d)))
             .collect();
-        ok.sort_by_key(|(c, d)| (c.relay, !c.local, *d));
+        ok.sort_by_key(|(c, d)| rank(c, *d));
         let (best, _) = ok.first().ok_or(Error::Unreachable)?;
         Ok(ServerConnection {
             machine_id: server.client_identifier.clone(),
@@ -93,9 +93,32 @@ impl PlexClient {
     }
 }
 
+/// Sort key for working connections, best first: direct before relay, local
+/// before remote, IPv4 before IPv6, then fastest. IPv4 comes first because
+/// servers often don't count IPv6 addresses as part of the LAN, so they treat
+/// the app as remote and cap its bitrate (high-bitrate 4K then fails to play).
+fn rank(c: &Connection, latency: Duration) -> (bool, bool, bool, Duration) {
+    (c.relay, !c.local, c.ipv6, latency)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prefers_local_ipv4() {
+        let conn = |uri: &str, local, relay, ipv6| Connection { uri: uri.into(), local, relay, ipv6 };
+        let ms = Duration::from_millis;
+        let mut found = vec![
+            (conn("relay", false, true, false), ms(5)),
+            (conn("v6", true, false, true), ms(1)),
+            (conn("remote", false, false, false), ms(1)),
+            (conn("v4", true, false, false), ms(9)),
+        ];
+        found.sort_by_key(|(c, d)| rank(c, *d));
+        let order: Vec<_> = found.iter().map(|(c, _)| c.uri.as_str()).collect();
+        assert_eq!(order, ["v4", "v6", "remote", "relay"]);
+    }
 
     #[test]
     fn parses_sections() {
