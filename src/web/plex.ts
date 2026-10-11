@@ -7,7 +7,7 @@
  * plain GETs stay "simple" requests and skip the CORS preflight.
  */
 import type { AuthStart, Hub, LibrarySection, Metadata, Page, ServerConnection, ServerSummary, Session, User } from "@/lib/api";
-import type { Marker, PlaybackInfo } from "@/lib/player";
+import type { Episode, Marker, PlaybackInfo } from "@/lib/player";
 import { DEFAULT_PREFS, type Prefs } from "@/lib/prefs";
 
 const PLEX_TV = "https://plex.tv";
@@ -261,20 +261,36 @@ async function children(ratingKey: string): Promise<Metadata[]> {
   return (c.Metadata ?? []).map(meta);
 }
 
-function firstAfter(items: Metadata[], after: number) {
-  return items
-    .filter((m) => m.index != null && m.index > after)
-    .sort((a, b) => a.index! - b.index!)[0];
+/**
+ * The episodes around `ep` in its show: the one before it and every one
+ * after it, in order. Specials only count when `ep` is itself a special.
+ */
+interface Neighbours {
+  previous?: Metadata;
+  after: Metadata[];
 }
 
-async function nextEpisode(ep: Metadata): Promise<Metadata | undefined> {
-  if (!ep.parentRatingKey || ep.index == null) return;
-  const next = firstAfter(await children(ep.parentRatingKey), ep.index);
-  if (next) return next;
-  if (!ep.grandparentRatingKey || ep.parentIndex == null) return;
-  const season = firstAfter(await children(ep.grandparentRatingKey), ep.parentIndex);
-  if (!season) return;
-  return firstAfter(await children(season.ratingKey), -Infinity);
+async function episodeNeighbours(ep: Metadata): Promise<Neighbours> {
+  if (!ep.grandparentRatingKey) return { after: [] };
+  const specials = ep.parentIndex === 0;
+  const all = ((await container(`/library/metadata/${ep.grandparentRatingKey}/allLeaves`)).Metadata ?? [])
+    .map(meta)
+    .filter((m) => (m.parentIndex === 0) === specials)
+    .sort((a, b) => (a.parentIndex ?? 0) - (b.parentIndex ?? 0) || (a.index ?? 0) - (b.index ?? 0));
+  const at = all.findIndex((m) => m.ratingKey === ep.ratingKey);
+  if (at < 0) return { after: [] };
+  return { previous: all[at - 1], after: all.slice(at + 1) };
+}
+
+function episode(m: Metadata): Episode {
+  return {
+    ratingKey: m.ratingKey,
+    title: m.title,
+    subtitle: episodeLabel(m),
+    thumb: m.thumb,
+    durationMs: m.duration,
+    watched: (m.viewCount ?? 0) > 0,
+  };
 }
 
 function episodeLabel(m: Metadata) {
@@ -367,7 +383,9 @@ async function playbackInfo(ratingKey: string): Promise<WebPlaybackInfo> {
   if (!part?.key) throw new Error("This item has no playable file");
   const streams = part.Stream ?? [];
   const m = meta(item);
-  const next = m.type === "episode" ? await nextEpisode(m).catch(() => undefined) : undefined;
+  const none: Neighbours = { after: [] };
+  const around = m.type === "episode" ? await episodeNeighbours(m).catch(() => none) : none;
+  const queue = around.after.map(episode);
   return {
     ratingKey: m.ratingKey,
     title: m.title,
@@ -380,7 +398,9 @@ async function playbackInfo(ratingKey: string): Promise<WebPlaybackInfo> {
     mpvPath: "",
     logPath: "",
     stripDolbyVision: false,
-    next: next ? { ratingKey: next.ratingKey, title: next.title, subtitle: episodeLabel(next), thumb: next.thumb } : null,
+    next: queue[0] ?? null,
+    previous: around.previous ? episode(around.previous) : null,
+    queue,
     // Seek previews, chapters and remembered tracks are desktop-only for now.
     hasPreviews: false,
     chapters: [],
