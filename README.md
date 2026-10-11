@@ -34,5 +34,14 @@ Settings (including the Plex token) are stored in
 3. `pnpm tauri dev` runs the app with hot reload.
 4. `pnpm tauri build` produces an installer under `target/release/bundle`.
 
-Every push also builds the installer in GitHub Actions; download it from the
-run's **Artifacts**.
+## Updates
+
+Every merge to `main` publishes a signed release (`v0.1.<run number>`) via
+`.github/workflows/release.yml`. On launch the app checks
+`releases/latest/download/latest.json`, downloads a newer build in the
+background and offers **Restart to update**.
+
+Releases are signed with the updater key: its public half is in
+`src-tauri/tauri.conf.json`, the private half is the
+`TAURI_SIGNING_PRIVATE_KEY` repository secret. Lose the private key and
+installed copies can no longer update, so keep a backup of it.

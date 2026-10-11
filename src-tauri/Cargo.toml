@@ -19,6 +19,8 @@ tauri-build = { version = "2", features = [] }
 plex = { path = "../crates/plex" }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["sync"] }
