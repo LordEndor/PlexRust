@@ -4,6 +4,13 @@ A fast Plex player for Windows, in the spirit of Infuse. The core (Plex API,
 playback control, settings) is Rust; the interface is React with
 [shadcn/ui](https://ui.shadcn.com) running in [Tauri 2](https://tauri.app).
 
+> [!WARNING]
+> This project is vibe coded, built with AI assistance for my own personal use.
+> You're welcome to use it and to send feedback or open issues, but please read
+> through the code before you install it. It signs in to your Plex account and
+> stores your Plex token on disk, so make sure you're comfortable with what it
+> does. It comes with no warranty or support.
+
 ![Home](docs/home.png)
 
 ## Status
