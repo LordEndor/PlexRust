@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Clapperboard, Ellipsis, Play, RotateCcw, Star } from "lucide-react";
 
+import { InfoDialog } from "@/components/InfoDialog";
 import { ItemContextMenu, itemActions } from "@/components/ItemMenu";
 import { Poster, ProgressBar } from "@/components/Poster";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -85,7 +86,10 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
 function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | null; upNext: Metadata | null }) {
   const nav = useNav();
   const { server, navigate } = nav;
-  const actions = itemActions(item, nav).filter((a) => a.label !== "Play" && a.label !== "Resume");
+  const [info, setInfo] = useState(false);
+  const actions = itemActions(item, nav, { onInfo: () => setInfo(true) }).filter(
+    (a) => a.label !== "Play" && a.label !== "Resume",
+  );
   // What the Play button starts: the item itself, or a show's next episode.
   const target = item.type === "movie" || item.type === "episode" ? item : upNext;
   const targetResumable = !!target && progress(target) > 0;
@@ -240,6 +244,7 @@ function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | n
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+            {info && <InfoDialog item={item} open={info} onOpenChange={setInfo} />}
           </div>
           {target && target !== item && (
             <p className="text-muted-foreground -mt-1 text-sm">

@@ -36,7 +36,7 @@ export function HubRow({ hub }: { hub: Hub }) {
       </div>
       <div
         ref={scroller}
-        className="-mx-2 flex snap-x gap-4 overflow-x-auto px-2 pt-1 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="-mx-4 -mt-2 flex snap-x scroll-px-4 gap-4 overflow-x-auto px-4 pt-3 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {hub.Metadata.map((m) => (
           <div key={m.ratingKey} className="shrink-0 snap-start" style={{ width: wide ? size.wide : size.poster }}>

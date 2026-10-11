@@ -219,7 +219,7 @@ function meta(m: Partial<Metadata>): Metadata {
 interface Container {
   totalSize?: number;
   size?: number;
-  Metadata?: (Metadata & RawExtras)[];
+  Metadata?: (Omit<Metadata, "Media"> & RawExtras)[];
   Hub?: (Hub & { Metadata?: Metadata[] })[];
   Directory?: (LibrarySection & FilterValue)[];
 }
@@ -227,7 +227,7 @@ interface Container {
 /** Fields the UI types don't carry but playback needs. */
 interface RawExtras {
   Marker?: Marker[];
-  Media: (Metadata["Media"][number] & { Part?: RawPart[] })[];
+  Media: (Omit<Metadata["Media"][number], "Part"> & { Part?: RawPart[] })[];
 }
 
 interface RawPart {

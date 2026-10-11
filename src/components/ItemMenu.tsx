@@ -1,4 +1,7 @@
-import { Eye, EyeOff, Layers, Play, Tv, X } from "lucide-react";
+import { useState } from "react";
+import { Eye, EyeOff, Info, Layers, Play, Tv, X } from "lucide-react";
+
+import { InfoDialog } from "@/components/InfoDialog";
 
 import {
   ContextMenu,
@@ -10,7 +13,7 @@ import {
 } from "@/components/ui/context-menu";
 import { errorMessage, library, type Metadata } from "@/lib/api";
 import { notifyLibraryChanged } from "@/lib/changes";
-import { isWatched, progress } from "@/lib/format";
+import { isWatched, progress, unwatchedCount } from "@/lib/format";
 import { useNav, type Nav } from "@/lib/nav";
 
 export interface ItemAction {
@@ -32,7 +35,11 @@ async function act(task: Promise<void>) {
 }
 
 /** What can be done to an item from its menu. */
-export function itemActions(item: Metadata, nav: Nav, opts: { continueWatching?: boolean } = {}): ItemAction[] {
+export function itemActions(
+  item: Metadata,
+  nav: Nav,
+  opts: { continueWatching?: boolean; onInfo?: () => void } = {},
+): ItemAction[] {
   const actions: ItemAction[] = [];
   const playable = item.type === "movie" || item.type === "episode";
   if (playable) {
@@ -44,14 +51,29 @@ export function itemActions(item: Metadata, nav: Nav, opts: { continueWatching?:
     });
   }
   if (playable || item.type === "show" || item.type === "season") {
-    const watched = isWatched(item);
     const what = item.type === "show" ? " show" : item.type === "season" ? " season" : "";
-    actions.push({
-      label: watched ? `Mark${what} as unwatched` : `Mark${what} as watched`,
-      icon: watched ? EyeOff : Eye,
-      run: () => act(library.setWatched(item.ratingKey, !watched)),
-      separated: actions.length > 0,
-    });
+    const group = item.type === "show" || item.type === "season";
+    // Part way through counts as both: it can be finished, or reset to unwatched.
+    const canWatch = !isWatched(item);
+    const canUnwatch = group
+      ? (item.viewedLeafCount ?? 0) > 0 || unwatchedCount(item) === 0
+      : (item.viewCount ?? 0) > 0 || progress(item) > 0;
+    if (canWatch) {
+      actions.push({
+        label: `Mark${what} as watched`,
+        icon: Eye,
+        run: () => act(library.setWatched(item.ratingKey, true)),
+        separated: actions.length > 0,
+      });
+    }
+    if (canUnwatch) {
+      actions.push({
+        label: `Mark${what} as unwatched`,
+        icon: EyeOff,
+        run: () => act(library.setWatched(item.ratingKey, false)),
+        separated: !canWatch && actions.length > 0,
+      });
+    }
   }
   if (opts.continueWatching) {
     actions.push({
@@ -77,6 +99,9 @@ export function itemActions(item: Metadata, nav: Nav, opts: { continueWatching?:
       run: () => nav.navigate({ name: "item", ratingKey: season }),
     });
   }
+  if (opts.onInfo) {
+    actions.push({ label: "Get info", icon: Info, run: opts.onInfo, separated: true });
+  }
   return actions;
 }
 
@@ -91,25 +116,28 @@ export function ItemContextMenu({
   children: React.ReactNode;
 }) {
   const nav = useNav();
-  const actions = itemActions(item, nav, { continueWatching });
-  if (actions.length === 0) return <>{children}</>;
+  const [info, setInfo] = useState(false);
+  const actions = itemActions(item, nav, { continueWatching, onInfo: () => setInfo(true) });
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuLabel>
-          {item.type === "episode" ? `${item.grandparentTitle} · ${item.title}` : item.title}
-        </ContextMenuLabel>
-        {actions.map((a) => (
-          <div key={a.label}>
-            {a.separated && <ContextMenuSeparator />}
-            <ContextMenuItem onSelect={a.run}>
-              <a.icon />
-              {a.label}
-            </ContextMenuItem>
-          </div>
-        ))}
-      </ContextMenuContent>
-    </ContextMenu>
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuLabel>
+            {item.type === "episode" ? `${item.grandparentTitle} · ${item.title}` : item.title}
+          </ContextMenuLabel>
+          {actions.map((a) => (
+            <div key={a.label}>
+              {a.separated && <ContextMenuSeparator />}
+              <ContextMenuItem onSelect={a.run}>
+                <a.icon />
+                {a.label}
+              </ContextMenuItem>
+            </div>
+          ))}
+        </ContextMenuContent>
+      </ContextMenu>
+      {info && <InfoDialog item={item} open={info} onOpenChange={setInfo} />}
+    </>
   );
 }
