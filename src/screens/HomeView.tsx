@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { FeaturedBanner, featuredItems } from "@/components/FeaturedBanner";
 import { HubRow } from "@/components/HubRow";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, library, type Hub } from "@/lib/api";
@@ -7,6 +8,7 @@ import { errorMessage, library, type Hub } from "@/lib/api";
 export function HomeView() {
   const [hubs, setHubs] = useState<Hub[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const featured = useMemo(() => (hubs ? featuredItems(hubs) : []), [hubs]);
 
   useEffect(() => {
     library
@@ -20,6 +22,7 @@ export function HomeView() {
 
   return (
     <div className="flex h-full flex-col gap-10 overflow-y-auto p-8">
+      <FeaturedBanner items={featured} />
       {error && <p className="text-destructive text-sm">{error}</p>}
       {hubs === null &&
         Array.from({ length: 3 }, (_, i) => (

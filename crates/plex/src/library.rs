@@ -57,6 +57,8 @@ pub struct Metadata {
     /// Intro and credits markers (needs `includeMarkers=1`).
     #[serde(rename = "Marker")]
     pub markers: Vec<Marker>,
+    /// For extras: 1 is a trailer.
+    pub extra_type: Option<u32>,
     /// Chapters from the file (needs `includeChapters=1`).
     #[serde(rename = "Chapter")]
     pub chapters: Vec<Chapter>,
@@ -99,6 +101,8 @@ pub struct Tag {
 #[serde(rename_all = "camelCase", default)]
 pub struct Media {
     pub video_resolution: Option<String>,
+    /// Overall bitrate in kbps.
+    pub bitrate: Option<u32>,
     pub video_codec: Option<String>,
     pub audio_codec: Option<String>,
     pub audio_channels: Option<u32>,
@@ -178,6 +182,56 @@ struct MediaContainer {
     metadata: Vec<Metadata>,
     #[serde(rename = "Hub")]
     hub: Vec<Hub>,
+    #[serde(rename = "Directory")]
+    directory: Vec<Directory>,
+}
+
+/// A filter value offered by a library, such as one genre or decade.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Directory {
+    /// The value to filter by.
+    pub key: String,
+    pub title: String,
+}
+
+/// What a library listing is narrowed down to. Empty means everything.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Filters {
+    pub genre: Option<String>,
+    pub decade: Option<String>,
+    /// `4k`, `1080`, `720`, `480` or `sd`.
+    pub resolution: Option<String>,
+    pub unwatched: bool,
+    /// Plex can't filter on bitrate, so this one is applied here.
+    pub min_bitrate_kbps: Option<u32>,
+}
+
+impl Filters {
+    /// The part Plex filters on, as query parameters.
+    fn query(&self) -> Vec<(&'static str, String)> {
+        let mut q = Vec::new();
+        if let Some(g) = &self.genre {
+            q.push(("genre", g.clone()));
+        }
+        if let Some(d) = &self.decade {
+            q.push(("decade", d.clone()));
+        }
+        if let Some(r) = &self.resolution {
+            q.push(("resolution", r.clone()));
+        }
+        if self.unwatched {
+            q.push(("unwatched", "1".into()));
+        }
+        q
+    }
+
+    /// Whether `item` passes the filters Plex can't apply.
+    pub fn keeps(&self, item: &Metadata) -> bool {
+        self.min_bitrate_kbps
+            .is_none_or(|min| item.media.iter().any(|m| m.bitrate.is_some_and(|b| b >= min)))
+    }
 }
 
 impl PlexClient {
@@ -201,30 +255,67 @@ impl PlexClient {
         Ok(c.hub.into_iter().filter(|h| !h.metadata.is_empty()).collect())
     }
 
-    /// `size` items of a library section starting at `start`, sorted by
-    /// `sort` (a Plex sort key such as `titleSort` or `addedAt:desc`).
-    pub async fn section_items(
+    /// A page of a library section (`page` is start and size), sorted by
+    /// `sort` and narrowed down by `filters`. With a bitrate filter the whole
+    /// matching library comes back in one go, since Plex can't page through a
+    /// filter it doesn't apply.
+    pub async fn section_filtered(
         &self,
         server: &ServerConnection,
         section: &str,
-        start: u32,
-        size: u32,
+        page: Option<(u32, u32)>,
         sort: &str,
+        filters: &Filters,
     ) -> Result<Page> {
-        let (start, size) = (start.to_string(), size.to_string());
+        let mut query: Vec<(&str, String)> = vec![("sort", sort.to_owned())];
+        query.extend(filters.query());
+        if let Some((start, size)) = page.filter(|_| filters.min_bitrate_kbps.is_none()) {
+            query.push(("X-Plex-Container-Start", start.to_string()));
+            query.push(("X-Plex-Container-Size", size.to_string()));
+        }
+        let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let c = self
-            .container(
-                server,
-                &format!("/library/sections/{section}/all"),
-                &[
-                    ("sort", sort),
-                    ("X-Plex-Container-Start", &start),
-                    ("X-Plex-Container-Size", &size),
-                ],
-            )
+            .container(server, &format!("/library/sections/{section}/all"), &query)
             .await?;
+        if filters.min_bitrate_kbps.is_some() {
+            let items: Vec<Metadata> = c.metadata.into_iter().filter(|m| filters.keeps(m)).collect();
+            let total = items.len() as u32;
+            return Ok(Page { items, total });
+        }
         let total = c.total_size.or(c.size).unwrap_or(c.metadata.len() as u32);
         Ok(Page { items: c.metadata, total })
+    }
+
+    /// Values a library can be filtered by: `genre` or `decade`.
+    pub async fn filter_values(&self, server: &ServerConnection, section: &str, field: &str) -> Result<Vec<Directory>> {
+        let c = self
+            .container(server, &format!("/library/sections/{section}/{field}"), &[])
+            .await?;
+        Ok(c.directory)
+    }
+
+    /// A library's collections.
+    pub async fn collections(&self, server: &ServerConnection, section: &str) -> Result<Vec<Metadata>> {
+        let c = self
+            .container(server, &format!("/library/sections/{section}/collections"), &[])
+            .await?;
+        Ok(c.metadata)
+    }
+
+    /// The movies or shows in a collection.
+    pub async fn collection_items(&self, server: &ServerConnection, collection: &str) -> Result<Vec<Metadata>> {
+        let c = self
+            .container(server, &format!("/library/collections/{collection}/children"), &[])
+            .await?;
+        Ok(c.metadata)
+    }
+
+    /// An item's trailers, from its extras.
+    pub async fn trailers(&self, server: &ServerConnection, rating_key: &str) -> Result<Vec<Metadata>> {
+        let c = self
+            .container(server, &format!("/library/metadata/{rating_key}/extras"), &[])
+            .await?;
+        Ok(c.metadata.into_iter().filter(|m| m.extra_type == Some(1)).collect())
     }
 
     /// Full details for one item, including cast, genres and media info.
@@ -299,6 +390,25 @@ mod tests {
         assert_eq!(m.view_offset, Some(120_000));
         assert_eq!(m.media[0].video_resolution.as_deref(), Some("4k"));
         assert_eq!(m.role[0].role.as_deref(), Some("Hero"));
+    }
+
+    #[test]
+    fn bitrate_filter_keeps_any_fast_version() {
+        let item = |rates: &[u32]| Metadata {
+            media: rates.iter().map(|&b| Media { bitrate: Some(b), ..Default::default() }).collect(),
+            ..Default::default()
+        };
+        let f = Filters { min_bitrate_kbps: Some(20_000), ..Default::default() };
+        assert!(f.keeps(&item(&[8_000, 40_000])));
+        assert!(!f.keeps(&item(&[8_000])));
+        assert!(!f.keeps(&item(&[])));
+        assert!(Filters::default().keeps(&item(&[])));
+    }
+
+    #[test]
+    fn filters_become_query_params() {
+        let f = Filters { genre: Some("12".into()), unwatched: true, min_bitrate_kbps: Some(1), ..Default::default() };
+        assert_eq!(f.query(), [("genre", "12".to_owned()), ("unwatched", "1".to_owned())]);
     }
 
     #[test]
