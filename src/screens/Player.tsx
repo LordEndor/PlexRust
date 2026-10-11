@@ -173,7 +173,7 @@ export function Player({ ratingKey, resume, onClose }: Props) {
         let loadTimer: number | undefined;
         const load = async (url: string, at: number) => {
           window.clearTimeout(loadTimer);
-          loadTimer = window.setTimeout(() => fail("it didn't start within 45 seconds"), LOAD_TIMEOUT_MS);
+          loadTimer = window.setTimeout(() => fail("nothing played within 45 seconds"), LOAD_TIMEOUT_MS);
           await setProperty<string>("start", at > 0 ? String(at) : "none");
           await command("loadfile", [url]);
         };
@@ -206,9 +206,13 @@ export function Player({ ratingKey, resume, onClose }: Props) {
               const detail = (ev as { file_error?: unknown }).file_error;
               fail(typeof detail === "string" ? detail : "unknown error");
             }
-            if (ev.event === "file-loaded") {
+            // file-loaded only means the file opened; playback-restart is the
+            // first frame actually playing, so the watchdog waits for that.
+            if (ev.event === "playback-restart") {
               window.clearTimeout(loadTimer);
               setBuffering(false);
+            }
+            if (ev.event === "file-loaded") {
               if (!transcoding.current) {
                 for (const s of pi.externalSubtitles) {
                   command("sub-add", [s.url, "auto", s.title, s.language ?? ""]).catch(() => {});
