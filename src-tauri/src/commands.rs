@@ -1,6 +1,7 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use plex::{Hub, LibrarySection, Metadata, Page, Pin, ServerConnection, User};
+use plex::{Directory, Filters, Hub, LibrarySection, Metadata, Page, Pin, ServerConnection, User};
 use serde::Serialize;
 use tauri::State;
 
@@ -149,20 +150,76 @@ pub async fn home_hubs(state: State<'_, AppState>) -> CmdResult<Vec<Hub>> {
     state.plex.home_hubs(&server).await.map_err(err)
 }
 
+/// The last bitrate-filtered library. Plex can't filter on bitrate, so the
+/// whole library is fetched once and the grid pages through this copy.
+#[derive(Default)]
+pub struct FilteredLibrary(Mutex<Option<(String, Arc<Vec<Metadata>>)>>);
+
 #[tauri::command]
 pub async fn section_items(
     state: State<'_, AppState>,
+    filtered: State<'_, FilteredLibrary>,
     section: String,
     start: u32,
     size: u32,
     sort: String,
+    filters: Option<Filters>,
 ) -> CmdResult<Page> {
     let server = current_server(&state).await?;
-    state
-        .plex
-        .section_items(&server, &section, start, size, &sort)
-        .await
-        .map_err(err)
+    let filters = filters.unwrap_or_default();
+    if filters.min_bitrate_kbps.is_none() {
+        return state
+            .plex
+            .section_filtered(&server, &section, Some((start, size)), &sort, &filters)
+            .await
+            .map_err(err);
+    }
+
+    let key = format!("{}|{section}|{sort}|{}", server.machine_id, serde_json::to_string(&filters).map_err(err)?);
+    let cached = filtered.0.lock().unwrap().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone());
+    let all = match cached {
+        Some(all) => all,
+        None => {
+            let page = state
+                .plex
+                .section_filtered(&server, &section, None, &sort, &filters)
+                .await
+                .map_err(err)?;
+            let all = Arc::new(page.items);
+            *filtered.0.lock().unwrap() = Some((key, all.clone()));
+            all
+        }
+    };
+    let items = all.iter().skip(start as usize).take(size as usize).cloned().collect();
+    Ok(Page { items, total: all.len() as u32 })
+}
+
+/// Genres or decades a library can be filtered by.
+#[tauri::command]
+pub async fn filter_values(state: State<'_, AppState>, section: String, field: String) -> CmdResult<Vec<Directory>> {
+    if !matches!(field.as_str(), "genre" | "decade") {
+        return Err(format!("unknown filter {field}"));
+    }
+    let server = current_server(&state).await?;
+    state.plex.filter_values(&server, &section, &field).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn collections(state: State<'_, AppState>, section: String) -> CmdResult<Vec<Metadata>> {
+    let server = current_server(&state).await?;
+    state.plex.collections(&server, &section).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn collection_items(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
+    let server = current_server(&state).await?;
+    state.plex.collection_items(&server, &rating_key).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn trailers(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
+    let server = current_server(&state).await?;
+    state.plex.trailers(&server, &rating_key).await.map_err(err)
 }
 
 #[tauri::command]

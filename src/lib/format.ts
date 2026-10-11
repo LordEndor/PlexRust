@@ -38,6 +38,8 @@ export function subtitle(m: Metadata) {
       return `${m.grandparentTitle ?? ""} · ${episodeLabel(m)}`;
     case "season":
       return m.parentTitle ?? "";
+    case "collection":
+      return m.childCount ? `${m.childCount} item${m.childCount === 1 ? "" : "s"}` : "Collection";
     case "show":
       return m.childCount ? `${m.childCount} season${m.childCount === 1 ? "" : "s"}` : (m.year?.toString() ?? "");
     default:

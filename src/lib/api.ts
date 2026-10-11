@@ -69,6 +69,8 @@ export interface Tag {
 
 export interface Media {
   videoResolution?: string | null;
+  /** Overall bitrate in kbps. */
+  bitrate?: number | null;
   videoCodec?: string | null;
   audioCodec?: string | null;
   audioChannels?: number | null;
@@ -110,6 +112,8 @@ export interface Metadata {
   Director: Tag[];
   Role: Tag[];
   Media: Media[];
+  /** For extras: 1 is a trailer. */
+  extraType?: number | null;
 }
 
 export interface Hub {
@@ -119,6 +123,22 @@ export interface Hub {
   Metadata: Metadata[];
 }
 
+/** What a library listing is narrowed down to. */
+export interface Filters {
+  genre?: string | null;
+  decade?: string | null;
+  /** `4k`, `1080`, `720`, `480` or `sd`. */
+  resolution?: string | null;
+  unwatched?: boolean;
+  minBitrateKbps?: number | null;
+}
+
+/** One value a library can be filtered by, such as a genre. */
+export interface FilterValue {
+  key: string;
+  title: string;
+}
+
 export interface Page {
   items: Metadata[];
   total: number;
@@ -126,8 +146,13 @@ export interface Page {
 
 export const library = {
   homeHubs: () => invoke<Hub[]>("home_hubs"),
-  sectionItems: (section: string, start: number, size: number, sort = "titleSort") =>
-    invoke<Page>("section_items", { section, start, size, sort }),
+  sectionItems: (section: string, start: number, size: number, sort = "titleSort", filters?: Filters) =>
+    invoke<Page>("section_items", { section, start, size, sort, filters }),
+  filterValues: (section: string, field: "genre" | "decade") =>
+    invoke<FilterValue[]>("filter_values", { section, field }),
+  collections: (section: string) => invoke<Metadata[]>("collections", { section }),
+  collectionItems: (ratingKey: string) => invoke<Metadata[]>("collection_items", { ratingKey }),
+  trailers: (ratingKey: string) => invoke<Metadata[]>("trailers", { ratingKey }),
   metadata: (ratingKey: string) => invoke<Metadata>("metadata", { ratingKey }),
   children: (ratingKey: string) => invoke<Metadata[]>("children", { ratingKey }),
   search: (query: string) => invoke<Hub[]>("search", { query }),

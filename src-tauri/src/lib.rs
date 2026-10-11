@@ -39,6 +39,7 @@ pub fn run() {
             })?;
             app.manage(images::ImageCache::default());
             app.manage(player::PreviewStore::default());
+            app.manage(commands::FilteredLibrary::default());
             app.manage(AppState {
                 plex,
                 settings: Mutex::new(settings),
@@ -56,6 +57,10 @@ pub fn run() {
             commands::library_sections,
             commands::home_hubs,
             commands::section_items,
+            commands::filter_values,
+            commands::collections,
+            commands::collection_items,
+            commands::trailers,
             commands::metadata,
             commands::children,
             commands::search,

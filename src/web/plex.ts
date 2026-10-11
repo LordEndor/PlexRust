@@ -6,8 +6,20 @@
  * Plex's identification headers and the token travel as query parameters, so
  * plain GETs stay "simple" requests and skip the CORS preflight.
  */
-import type { AuthStart, Hub, LibrarySection, Metadata, Page, ServerConnection, ServerSummary, Session, User } from "@/lib/api";
-import type { Marker, PlaybackInfo } from "@/lib/player";
+import type {
+  AuthStart,
+  FilterValue,
+  Filters,
+  Hub,
+  LibrarySection,
+  Metadata,
+  Page,
+  ServerConnection,
+  ServerSummary,
+  Session,
+  User,
+} from "@/lib/api";
+import type { Episode, Marker, PlaybackInfo } from "@/lib/player";
 import { DEFAULT_PREFS, type Prefs } from "@/lib/prefs";
 
 const PLEX_TV = "https://plex.tv";
@@ -209,7 +221,7 @@ interface Container {
   size?: number;
   Metadata?: (Metadata & RawExtras)[];
   Hub?: (Hub & { Metadata?: Metadata[] })[];
-  Directory?: LibrarySection[];
+  Directory?: (LibrarySection & FilterValue)[];
 }
 
 /** Fields the UI types don't carry but playback needs. */
@@ -261,20 +273,36 @@ async function children(ratingKey: string): Promise<Metadata[]> {
   return (c.Metadata ?? []).map(meta);
 }
 
-function firstAfter(items: Metadata[], after: number) {
-  return items
-    .filter((m) => m.index != null && m.index > after)
-    .sort((a, b) => a.index! - b.index!)[0];
+/**
+ * The episodes around `ep` in its show: the one before it and every one
+ * after it, in order. Specials only count when `ep` is itself a special.
+ */
+interface Neighbours {
+  previous?: Metadata;
+  after: Metadata[];
 }
 
-async function nextEpisode(ep: Metadata): Promise<Metadata | undefined> {
-  if (!ep.parentRatingKey || ep.index == null) return;
-  const next = firstAfter(await children(ep.parentRatingKey), ep.index);
-  if (next) return next;
-  if (!ep.grandparentRatingKey || ep.parentIndex == null) return;
-  const season = firstAfter(await children(ep.grandparentRatingKey), ep.parentIndex);
-  if (!season) return;
-  return firstAfter(await children(season.ratingKey), -Infinity);
+async function episodeNeighbours(ep: Metadata): Promise<Neighbours> {
+  if (!ep.grandparentRatingKey) return { after: [] };
+  const specials = ep.parentIndex === 0;
+  const all = ((await container(`/library/metadata/${ep.grandparentRatingKey}/allLeaves`)).Metadata ?? [])
+    .map(meta)
+    .filter((m) => (m.parentIndex === 0) === specials)
+    .sort((a, b) => (a.parentIndex ?? 0) - (b.parentIndex ?? 0) || (a.index ?? 0) - (b.index ?? 0));
+  const at = all.findIndex((m) => m.ratingKey === ep.ratingKey);
+  if (at < 0) return { after: [] };
+  return { previous: all[at - 1], after: all.slice(at + 1) };
+}
+
+function episode(m: Metadata): Episode {
+  return {
+    ratingKey: m.ratingKey,
+    title: m.title,
+    subtitle: episodeLabel(m),
+    thumb: m.thumb,
+    durationMs: m.duration,
+    watched: (m.viewCount ?? 0) > 0,
+  };
 }
 
 function episodeLabel(m: Metadata) {
@@ -367,7 +395,9 @@ async function playbackInfo(ratingKey: string): Promise<WebPlaybackInfo> {
   if (!part?.key) throw new Error("This item has no playable file");
   const streams = part.Stream ?? [];
   const m = meta(item);
-  const next = m.type === "episode" ? await nextEpisode(m).catch(() => undefined) : undefined;
+  const none: Neighbours = { after: [] };
+  const around = m.type === "episode" ? await episodeNeighbours(m).catch(() => none) : none;
+  const queue = around.after.map(episode);
   return {
     ratingKey: m.ratingKey,
     title: m.title,
@@ -380,7 +410,9 @@ async function playbackInfo(ratingKey: string): Promise<WebPlaybackInfo> {
     mpvPath: "",
     logPath: "",
     stripDolbyVision: false,
-    next: next ? { ratingKey: next.ratingKey, title: next.title, subtitle: episodeLabel(next), thumb: next.thumb } : null,
+    next: queue[0] ?? null,
+    previous: around.previous ? episode(around.previous) : null,
+    queue,
     // Seek previews, chapters and remembered tracks are desktop-only for now.
     hasPreviews: false,
     chapters: [],
@@ -398,6 +430,9 @@ export const getPlaybackInfo = playbackInfo;
 // Commands, by the names `invoke` uses
 
 type Args = Record<string, unknown>;
+
+/** The last bitrate-filtered library, paged through locally. */
+let bitrateCache: { key: string; items: Metadata[] } | null = null;
 type Command = (args: Args) => Promise<unknown>;
 
 const commands: Record<string, Command> = {
@@ -461,14 +496,52 @@ const commands: Record<string, Command> = {
     return hubs(await container("/hubs", { count: 20, includeLibraryPlaylists: 0 }));
   },
 
-  async section_items({ section, start, size, sort }): Promise<Page> {
+  async section_items({ section, start, size, sort, filters }): Promise<Page> {
+    const f = (filters ?? {}) as Filters;
+    const params: Params = { sort: sort as string };
+    if (f.genre) params.genre = f.genre;
+    if (f.decade) params.decade = f.decade;
+    if (f.resolution) params.resolution = f.resolution;
+    if (f.unwatched) params.unwatched = 1;
+    const [from, count] = [start as number, size as number];
+    // Plex can't filter on bitrate: fetch the matching library and page here.
+    if (f.minBitrateKbps) {
+      const min = f.minBitrateKbps;
+      const key = JSON.stringify([section, sort, f]);
+      if (bitrateCache?.key !== key) {
+        const all = ((await container(`/library/sections/${section}/all`, params)).Metadata ?? [])
+          .map(meta)
+          .filter((m) => m.Media.some((media) => (media.bitrate ?? 0) >= min));
+        bitrateCache = { key, items: all };
+      }
+      return { items: bitrateCache.items.slice(from, from + count), total: bitrateCache.items.length };
+    }
     const c = await container(`/library/sections/${section}/all`, {
-      sort: sort as string,
-      "X-Plex-Container-Start": start as number,
-      "X-Plex-Container-Size": size as number,
+      ...params,
+      "X-Plex-Container-Start": from,
+      "X-Plex-Container-Size": count,
     });
     const items = (c.Metadata ?? []).map(meta);
     return { items, total: c.totalSize ?? c.size ?? items.length };
+  },
+
+  async filter_values({ section, field }): Promise<FilterValue[]> {
+    if (field !== "genre" && field !== "decade") throw new Error(`unknown filter ${field}`);
+    const c = await container(`/library/sections/${section}/${field}`);
+    return (c.Directory ?? []).map((d) => ({ key: d.key, title: d.title }));
+  },
+
+  async collections({ section }): Promise<Metadata[]> {
+    return ((await container(`/library/sections/${section}/collections`)).Metadata ?? []).map(meta);
+  },
+
+  async collection_items({ ratingKey }): Promise<Metadata[]> {
+    return ((await container(`/library/collections/${ratingKey}/children`)).Metadata ?? []).map(meta);
+  },
+
+  async trailers({ ratingKey }): Promise<Metadata[]> {
+    const c = await container(`/library/metadata/${ratingKey}/extras`);
+    return (c.Metadata ?? []).map(meta).filter((m) => m.extraType === 1);
   },
 
   async metadata({ ratingKey }): Promise<Metadata> {

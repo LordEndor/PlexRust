@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Play, RotateCcw, Star } from "lucide-react";
+import { Check, Clapperboard, Play, RotateCcw, Star } from "lucide-react";
 
 import { Poster, ProgressBar } from "@/components/Poster";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,6 +14,7 @@ import { formatTime } from "@/lib/player";
 export function ItemView({ ratingKey }: { ratingKey: string }) {
   const [item, setItem] = useState<Metadata | null>(null);
   const [children, setChildren] = useState<Metadata[] | null>(null);
+  const [trailer, setTrailer] = useState<Metadata | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,8 +24,15 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
         const m = await library.metadata(ratingKey);
         if (!live) return;
         setItem(m);
-        if (m.type === "show" || m.type === "season") {
-          const kids = await library.children(ratingKey);
+        if (m.type === "movie" || m.type === "show") {
+          // Trailers are a bonus: no button if they can't be listed.
+          library
+            .trailers(ratingKey)
+            .then((t) => live && setTrailer(t[0] ?? null))
+            .catch(() => {});
+        }
+        if (m.type === "show" || m.type === "season" || m.type === "collection") {
+          const kids = await (m.type === "collection" ? library.collectionItems(ratingKey) : library.children(ratingKey));
           if (live) setChildren(kids);
         }
       } catch (e) {
@@ -41,17 +49,18 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <Hero item={item} />
-      <div className="flex flex-col gap-10 px-8 pb-12">
+      <Hero item={item} trailer={trailer} />
+      <div className="relative flex flex-col gap-10 px-8 pb-12">
         {item.type === "show" && <Seasons seasons={children} />}
         {item.type === "season" && <Episodes episodes={children} />}
+        {item.type === "collection" && <Seasons seasons={children} title="In this collection" />}
         {item.Role.length > 0 && <Cast item={item} />}
       </div>
     </div>
   );
 }
 
-function Hero({ item }: { item: Metadata }) {
+function Hero({ item, trailer }: { item: Metadata; trailer: Metadata | null }) {
   const { server, navigate } = useNav();
   const art = item.art ?? item.grandparentArt;
   const poster = item.type === "episode" ? item.thumb : (item.thumb ?? item.parentThumb);
@@ -67,6 +76,7 @@ function Hero({ item }: { item: Metadata }) {
     formatDuration(item.duration),
     item.type === "show" && item.childCount ? `${item.childCount} seasons` : null,
     item.type === "season" && item.leafCount ? `${item.leafCount} episodes` : null,
+    item.type === "collection" && item.childCount ? `${item.childCount} items` : null,
   ].filter(Boolean);
 
   return (
@@ -127,11 +137,14 @@ function Hero({ item }: { item: Metadata }) {
           )}
           {item.tagline && <p className="text-lg italic">{item.tagline}</p>}
           {item.summary && <p className="text-muted-foreground line-clamp-4 max-w-3xl text-sm leading-relaxed">{item.summary}</p>}
-          {(item.type === "movie" || item.type === "episode") && (
+          {(item.type === "movie" || item.type === "episode" || trailer) && (
             <div className="flex items-center gap-3">
-              <Button size="lg" onClick={() => navigate({ name: "player", ratingKey: item.ratingKey, resume: resumable })}>
-                <Play className="fill-current" /> {resumable ? `Resume from ${formatTime((item.viewOffset ?? 0) / 1000)}` : "Play"}
-              </Button>
+              {(item.type === "movie" || item.type === "episode") && (
+                <Button size="lg" onClick={() => navigate({ name: "player", ratingKey: item.ratingKey, resume: resumable })}>
+                  <Play className="fill-current" />{" "}
+                  {resumable ? `Resume from ${formatTime((item.viewOffset ?? 0) / 1000)}` : "Play"}
+                </Button>
+              )}
               {resumable && (
                 <Button
                   size="lg"
@@ -139,6 +152,15 @@ function Hero({ item }: { item: Metadata }) {
                   onClick={() => navigate({ name: "player", ratingKey: item.ratingKey, resume: false })}
                 >
                   <RotateCcw /> From the start
+                </Button>
+              )}
+              {trailer && (
+                <Button
+                  size="lg"
+                  variant="secondary"
+                  onClick={() => navigate({ name: "player", ratingKey: trailer.ratingKey, resume: false })}
+                >
+                  <Clapperboard /> Trailer
                 </Button>
               )}
             </div>
@@ -152,10 +174,10 @@ function Hero({ item }: { item: Metadata }) {
   );
 }
 
-function Seasons({ seasons }: { seasons: Metadata[] | null }) {
+function Seasons({ seasons, title = "Seasons" }: { seasons: Metadata[] | null; title?: string }) {
   return (
     <section>
-      <h2 className="mb-3 text-lg font-semibold">Seasons</h2>
+      <h2 className="mb-3 text-lg font-semibold">{title}</h2>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-5">
         {seasons === null
           ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="aspect-[2/3] rounded-xl" />)
