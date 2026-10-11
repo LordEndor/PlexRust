@@ -45,6 +45,16 @@ pub struct Prefs {
     pub audio_language: String,
     /// As above, or "off" to start with subtitles off.
     pub subtitle_language: String,
+    /// Accent color name, such as "amber".
+    pub accent: String,
+    /// "small", "medium" or "large".
+    pub poster_size: String,
+    /// The rotating banner at the top of Home.
+    pub show_featured: bool,
+    /// Home rows by hub identifier, in the picked order.
+    pub hub_order: Vec<String>,
+    /// Home rows turned off, by hub identifier.
+    pub hidden_hubs: Vec<String>,
 }
 
 impl Default for Prefs {
@@ -55,6 +65,11 @@ impl Default for Prefs {
             quality: "Original".into(),
             audio_language: String::new(),
             subtitle_language: String::new(),
+            accent: "amber".into(),
+            poster_size: "medium".into(),
+            show_featured: true,
+            hub_order: Vec::new(),
+            hidden_hubs: Vec::new(),
         }
     }
 }

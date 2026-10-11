@@ -19,6 +19,7 @@ import { useLibraryChanged } from "@/lib/changes";
 import { episodeLabel, formatDuration, isWatched, progress, resolutionLabel } from "@/lib/format";
 import { useNav } from "@/lib/nav";
 import { formatTime } from "@/lib/player";
+import { posterSize, usePrefs } from "@/lib/prefs";
 
 export function ItemView({ ratingKey }: { ratingKey: string }) {
   const [item, setItem] = useState<Metadata | null>(null);
@@ -255,10 +256,14 @@ function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | n
 }
 
 function Seasons({ seasons, title = "Seasons" }: { seasons: Metadata[] | null; title?: string }) {
+  const prefs = usePrefs();
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold">{title}</h2>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-5">
+      <div
+        className="grid gap-5"
+        style={{ gridTemplateColumns: `repeat(auto-fill,minmax(${posterSize(prefs).poster - 10}px,1fr))` }}
+      >
         {seasons === null
           ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="aspect-[2/3] rounded-xl" />)
           : seasons.map((s) => <Poster key={s.ratingKey} item={s} />)}

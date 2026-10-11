@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Poster } from "@/components/Poster";
 import type { Hub } from "@/lib/api";
+import { posterSize, usePrefs } from "@/lib/prefs";
 
 /** Hubs that read better as wide thumbnails with progress, like Infuse. */
 function isWide(hub: Hub) {
@@ -13,6 +14,7 @@ function isWide(hub: Hub) {
 export function HubRow({ hub }: { hub: Hub }) {
   const scroller = useRef<HTMLDivElement>(null);
   const wide = isWide(hub);
+  const size = posterSize(usePrefs());
 
   function scroll(dir: 1 | -1) {
     const el = scroller.current;
@@ -37,7 +39,7 @@ export function HubRow({ hub }: { hub: Hub }) {
         className="-mx-2 flex snap-x gap-4 overflow-x-auto px-2 pt-1 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {hub.Metadata.map((m) => (
-          <div key={m.ratingKey} className={wide ? "w-72 shrink-0 snap-start" : "w-40 shrink-0 snap-start"}>
+          <div key={m.ratingKey} className="shrink-0 snap-start" style={{ width: wide ? size.wide : size.poster }}>
             <Poster item={m} wide={wide} continueWatching={wide} />
           </div>
         ))}

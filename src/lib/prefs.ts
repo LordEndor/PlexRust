@@ -12,6 +12,16 @@ export interface Prefs {
   audioLanguage: string;
   /** As above, or "off" to start with subtitles off. */
   subtitleLanguage: string;
+  /** A key from ACCENTS. */
+  accent: string;
+  /** A key from POSTER_SIZES. */
+  posterSize: string;
+  /** The rotating banner at the top of Home. */
+  showFeatured: boolean;
+  /** Home rows by hub identifier, in the order picked on the settings page. */
+  hubOrder: string[];
+  /** Home rows turned off, by hub identifier. */
+  hiddenHubs: string[];
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -20,6 +30,11 @@ export const DEFAULT_PREFS: Prefs = {
   quality: "Original",
   audioLanguage: "",
   subtitleLanguage: "",
+  accent: "amber",
+  posterSize: "medium",
+  showFeatured: true,
+  hubOrder: [],
+  hiddenHubs: [],
 };
 
 // One copy for the whole app, so the settings page and the player agree.
@@ -67,3 +82,52 @@ export const LANGUAGES = [
   { label: "Italian", value: "it,ita" },
   { label: "Japanese", value: "ja,jpn" },
 ];
+
+/** Accent colors for buttons, progress bars and highlights. All light enough for dark text on top. */
+export const ACCENTS = [
+  { key: "amber", label: "Amber", color: "oklch(0.795 0.184 86.047)" },
+  { key: "orange", label: "Orange", color: "oklch(0.75 0.18 55)" },
+  { key: "red", label: "Red", color: "oklch(0.7 0.19 22)" },
+  { key: "pink", label: "Pink", color: "oklch(0.75 0.17 350)" },
+  { key: "purple", label: "Purple", color: "oklch(0.72 0.16 300)" },
+  { key: "blue", label: "Blue", color: "oklch(0.72 0.15 250)" },
+  { key: "teal", label: "Teal", color: "oklch(0.78 0.13 185)" },
+  { key: "green", label: "Green", color: "oklch(0.78 0.17 145)" },
+];
+
+/** Poster widths in pixels: portrait posters, and wide Continue Watching thumbnails. */
+export const POSTER_SIZES = [
+  { key: "small", label: "Small", poster: 130, wide: 240 },
+  { key: "medium", label: "Medium", poster: 160, wide: 288 },
+  { key: "large", label: "Large", poster: 200, wide: 352 },
+];
+
+export function posterSize(prefs: Prefs | null) {
+  return POSTER_SIZES.find((s) => s.key === prefs?.posterSize) ?? POSTER_SIZES[1];
+}
+
+/** Keeps the theme's accent in step with the setting. */
+export function useAccent() {
+  const prefs = usePrefs();
+  useEffect(() => {
+    const accent = ACCENTS.find((a) => a.key === prefs?.accent) ?? ACCENTS[0];
+    const root = document.documentElement.style;
+    root.setProperty("--primary", accent.color);
+    root.setProperty("--ring", accent.color);
+  }, [prefs?.accent]);
+}
+
+/** Hubs in the picked order (new ones keep Plex's order, after the picked ones), without hidden ones unless asked. */
+export function arrangeHubs<T extends { hubIdentifier: string }>(
+  hubs: T[],
+  prefs: Prefs | null,
+  keepHidden = false,
+): T[] {
+  const order = prefs?.hubOrder ?? [];
+  const rank = (h: T) => {
+    const i = order.indexOf(h.hubIdentifier);
+    return i < 0 ? order.length : i;
+  };
+  const sorted = hubs.map((h, i) => ({ h, i })).sort((a, b) => rank(a.h) - rank(b.h) || a.i - b.i);
+  return sorted.map((x) => x.h).filter((h) => keepHidden || !prefs?.hiddenHubs.includes(h.hubIdentifier));
+}
