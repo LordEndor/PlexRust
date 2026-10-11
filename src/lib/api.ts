@@ -69,6 +69,8 @@ export interface Tag {
 
 export interface Media {
   videoResolution?: string | null;
+  /** Overall bitrate in kbps. */
+  bitrate?: number | null;
   videoCodec?: string | null;
   audioCodec?: string | null;
   audioChannels?: number | null;
