@@ -11,7 +11,7 @@ playback control, settings) is Rust; the interface is React with
 - [x] Sign in with Plex (plex.tv PIN, approved in the browser)
 - [x] Server discovery, picking the fastest connection (local, then remote, then relay)
 - [x] Library browsing: home rows, virtualized poster grids, movie/show/season/episode pages, search
-- [ ] Player: embedded libmpv, direct play 4K HDR, transcode fallback, track picker, progress sync
+- [x] Player: embedded mpv, direct play (HDR passthrough), optional server transcode, audio/subtitle picker, progress sync
 - [ ] Auto-skip intros and credits from Plex markers, settings page
 
 ## Layout
@@ -24,6 +24,14 @@ playback control, settings) is Rust; the interface is React with
 
 Settings (including the Plex token) are stored in
 `%APPDATA%\com.lordendor.plexrust\settings.json`.
+
+## Playback
+
+Videos play in [mpv](https://mpv.io), embedded in the app window through
+`tauri-plugin-mpv` (mpv runs as a child process controlled over JSON IPC and
+draws underneath the transparent webview). CI downloads a Windows mpv build
+into `src-tauri/mpv/` and bundles it with the installer. For `pnpm tauri dev`,
+put `mpv` on your PATH or extract a build into `src-tauri/mpv/`.
 
 ## Developing on Windows
 

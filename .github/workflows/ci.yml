@@ -24,6 +24,21 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Fetch mpv for Windows
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $rel = gh api repos/shinchiro/mpv-winbuild-cmake/releases/latest | ConvertFrom-Json
+          $asset = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
+          if (-not $asset) { $rel.assets.name; throw "No mpv build found in $($rel.tag_name)" }
+          Write-Host "Bundling $($asset.name)"
+          Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z
+          7z x mpv.7z -osrc-tauri/mpv -y | Out-Null
+          Remove-Item src-tauri/mpv/installer, src-tauri/mpv/doc, src-tauri/mpv/mpv.com -Recurse -ErrorAction SilentlyContinue
+          if (-not (Test-Path src-tauri/mpv/mpv.exe)) { throw "mpv.exe missing after extract" }
+          Get-ChildItem src-tauri/mpv
+
       - name: Test Rust crates
         run: cargo test --workspace
 

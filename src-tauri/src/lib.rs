@@ -1,5 +1,6 @@
 mod commands;
 mod images;
+mod player;
 mod settings;
 
 use std::path::PathBuf;
@@ -23,6 +24,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_mpv::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let settings_path = app.path().app_config_dir()?.join("settings.json");
@@ -56,6 +58,10 @@ pub fn run() {
             commands::metadata,
             commands::children,
             commands::search,
+            player::playback_info,
+            player::transcode_url,
+            player::stop_transcode,
+            player::report_progress,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -9,6 +9,9 @@
     "core:default",
     "opener:default",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "mpv:default",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen"
   ]
 }
