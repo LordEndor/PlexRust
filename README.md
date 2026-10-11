@@ -20,17 +20,29 @@ playback control, settings) is Rust; the interface is React with
 - [x] Library browsing: home rows, virtualized poster grids, movie/show/season/episode pages, search
 - [x] Player: embedded mpv, direct play (HDR passthrough), optional server transcode, audio/subtitle picker, progress sync
 - [x] Skip intros and credits from Plex markers, Up Next for episodes, settings page
+- [x] Requests through Seerr, Overseerr or Jellyseerr: Discover, request movies and seasons, My requests
 
 ## Layout
 
 | Path | What |
 | --- | --- |
 | `crates/plex` | Async client for plex.tv and Plex Media Server. No Tauri dependency, unit tested. |
+| `crates/seerr` | Async client for Seerr (and Overseerr/Jellyseerr). Signs in with the Plex token. |
 | `src-tauri` | The Tauri app: commands the UI calls, persisted settings. |
 | `src` | React UI. `components/ui` holds shadcn/ui components. |
 
 Settings (including the Plex token) are stored in
 `%APPDATA%\com.lordendor.plexrust\settings.json`.
+
+## Requests
+
+Settings, Requests takes the address of a Seerr, Overseerr or Jellyseerr
+server. The app signs in to it with your Plex account, so requests are made
+as your Seerr user with its permissions and quota; an API key can be used
+instead if Plex sign-in is turned off in Seerr. Once connected, Discover
+appears in the sidebar: search TMDB, browse trending and upcoming titles,
+request movies (in 4K when a 4K Radarr is set up) or individual seasons, and
+follow them under My requests.
 
 ## Playback
 
@@ -78,5 +90,7 @@ It differs from the desktop app in a few ways:
   with hls.js). H.264 files are only repackaged; anything else, including 4K
   HDR, is re-encoded by the server at up to 1080p. Subtitles are burned in.
 - Skip intro/credits, Up Next and progress sync work the same way.
+- Requests (Discover) are desktop-only: Seerr sends no CORS headers, so a page
+  on github.io can't call it.
 - Chrome and Edge ask once for permission to reach devices on your local
   network the first time the page talks to a server at home.

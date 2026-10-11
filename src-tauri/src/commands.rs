@@ -67,7 +67,9 @@ pub async fn auth_wait(state: State<'_, AppState>, pin_id: u64, code: String) ->
 }
 
 #[tauri::command]
-pub async fn sign_out(state: State<'_, AppState>) -> CmdResult<()> {
+pub async fn sign_out(state: State<'_, AppState>, seerr: State<'_, crate::requests::SeerrState>) -> CmdResult<()> {
+    // The Seerr session belongs to this Plex account.
+    seerr.forget().await;
     let mut s = state.settings.lock().await;
     s.token = None;
     s.user = None;

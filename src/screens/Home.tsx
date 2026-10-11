@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Clapperboard,
+  Compass,
   Film,
   Home as HomeIcon,
   Image,
@@ -21,11 +22,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/UserAvatar";
 import { api, errorMessage, type LibrarySection, type ServerConnection, type User } from "@/lib/api";
 import { NavContext, routeKey, type Nav, type Route } from "@/lib/nav";
+import { useSeerrEnabled } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
 import { HomeView } from "@/screens/HomeView";
+import { DiscoverView } from "@/screens/DiscoverView";
 import { ItemView } from "@/screens/ItemView";
 import { LibraryView } from "@/screens/LibraryView";
 import { Player } from "@/screens/Player";
+import { RequestsView } from "@/screens/RequestsView";
+import { RequestView } from "@/screens/RequestView";
 import { SearchView } from "@/screens/SearchView";
 import { SettingsView } from "@/screens/SettingsView";
 
@@ -60,6 +65,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   const [stack, setStack] = useState<Route[]>([{ name: "home" }]);
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const requestsEnabled = useSeerrEnabled();
 
   function toggleSidebar() {
     setCollapsed((c) => {
@@ -170,6 +176,15 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
                   onClick={() => goRoot({ name: "library", section: s })}
                 />
               ))}
+          {requestsEnabled && (
+            <NavItem
+              icon={Compass}
+              label="Discover"
+              collapsed={collapsed}
+              active={root.name === "discover"}
+              onClick={() => goRoot({ name: "discover" })}
+            />
+          )}
           <div className="flex-1" />
           <NavItem
             icon={Settings}
@@ -243,6 +258,12 @@ function Screen({ route }: { route: Route }) {
       return <SearchView query={route.query} />;
     case "settings":
       return <SettingsView />;
+    case "discover":
+      return <DiscoverView query={route.query} />;
+    case "request":
+      return <RequestView mediaType={route.mediaType} tmdbId={route.tmdbId} />;
+    case "requests":
+      return <RequestsView />;
     case "player":
       return null;
   }

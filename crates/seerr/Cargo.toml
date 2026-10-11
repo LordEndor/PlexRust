@@ -1,0 +1,16 @@
+[package]
+name = "seerr"
+description = "Async client for Seerr, Overseerr and Jellyseerr request servers"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+futures = "0.3"
+reqwest = { workspace = true, features = ["cookies"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util"] }

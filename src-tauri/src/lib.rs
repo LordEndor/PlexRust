@@ -1,6 +1,7 @@
 mod commands;
 mod images;
 mod player;
+mod requests;
 mod settings;
 
 use std::path::PathBuf;
@@ -40,6 +41,7 @@ pub fn run() {
             app.manage(images::ImageCache::default());
             app.manage(player::PreviewStore::default());
             app.manage(commands::FilteredLibrary::default());
+            app.manage(requests::SeerrState::default());
             app.manage(AppState {
                 plex,
                 settings: Mutex::new(settings),
@@ -75,6 +77,17 @@ pub fn run() {
             player::report_progress,
             player::load_previews,
             player::remember_tracks,
+            requests::seerr_config,
+            requests::seerr_connect,
+            requests::seerr_disconnect,
+            requests::seerr_info,
+            requests::seerr_search,
+            requests::seerr_discover,
+            requests::seerr_details,
+            requests::seerr_quota,
+            requests::seerr_request,
+            requests::seerr_requests,
+            requests::seerr_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 
 import type { LibrarySection, ServerConnection } from "@/lib/api";
+import type { MediaType } from "@/lib/seerr";
 
 export type Route =
   | { name: "home" }
@@ -8,6 +9,9 @@ export type Route =
   | { name: "item"; ratingKey: string }
   | { name: "search"; query: string }
   | { name: "settings" }
+  | { name: "discover"; query?: string }
+  | { name: "request"; mediaType: MediaType; tmdbId: number }
+  | { name: "requests" }
   | { name: "player"; ratingKey: string; resume: boolean };
 
 export interface Nav {
@@ -36,6 +40,12 @@ export function routeKey(r: Route) {
       return `search:${r.query}`;
     case "settings":
       return "settings";
+    case "discover":
+      return `discover:${r.query ?? ""}`;
+    case "request":
+      return `request:${r.mediaType}:${r.tmdbId}`;
+    case "requests":
+      return "requests";
     case "player":
       return `player:${r.ratingKey}`;
   }

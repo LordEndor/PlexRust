@@ -25,6 +25,7 @@ import {
   type Prefs,
   type SkipMode,
 } from "@/lib/prefs";
+import { notifySeerrConfigChanged, seerr, SEERR_SUPPORTED, type SeerrInfo } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
 
 const SKIP_OPTIONS: { value: SkipMode; label: string }[] = [
@@ -128,6 +129,15 @@ export function SettingsView() {
               <HomeRows prefs={prefs} />
             </Section>
           </>
+        )}
+
+        {SEERR_SUPPORTED && (
+          <Section
+            title="Requests"
+            description="Connect your Seerr, Overseerr or Jellyseerr server to find and request movies and shows from Discover."
+          >
+            <SeerrSettings />
+          </Section>
         )}
 
         <Section title="About">
@@ -343,5 +353,121 @@ function UpdateRow() {
         </Button>
       )}
     </Row>
+  );
+}
+
+const inputClass =
+  "bg-input/30 border-input focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-72 rounded-lg border px-3 text-sm outline-none focus-visible:ring-[3px]";
+
+/** Address (and optional API key) of the Seerr server, with a check that it answers. */
+function SeerrSettings() {
+  const [url, setUrl] = useState("");
+  const [savedUrl, setSavedUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [hasKey, setHasKey] = useState(false);
+  const [info, setInfo] = useState<SeerrInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    seerr
+      .config()
+      .then((c) => {
+        setUrl(c.url);
+        setSavedUrl(c.url);
+        setHasKey(c.hasApiKey);
+        if (c.url) {
+          seerr
+            .info()
+            .then(setInfo)
+            .catch((e) => setError(errorMessage(e)));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  async function connect(clearKey = false) {
+    setBusy(true);
+    setError(null);
+    try {
+      const i = await seerr.connect(url, apiKey.trim() || null, clearKey);
+      const c = await seerr.config();
+      setInfo(i);
+      setUrl(c.url);
+      setSavedUrl(c.url);
+      setHasKey(c.hasApiKey);
+      setApiKey("");
+      notifySeerrConfigChanged();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await seerr.disconnect();
+    setInfo(null);
+    setUrl("");
+    setSavedUrl("");
+    setHasKey(false);
+    setError(null);
+    notifySeerrConfigChanged();
+  }
+
+  const status = error
+    ? `Couldn't connect: ${error}`
+    : info
+      ? `Connected as ${info.userName}${info.version ? ` · Seerr ${info.version}` : ""}.`
+      : savedUrl
+        ? "Connecting…"
+        : "Signs in with your Plex account, so requests are made as you.";
+
+  return (
+    <>
+      <Row label="Server address" hint={status}>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && url.trim() && connect()}
+          placeholder="http://192.168.1.10:5055"
+          className={inputClass}
+          spellCheck={false}
+        />
+      </Row>
+      <Row
+        label="API key"
+        hint={
+          hasKey
+            ? "Saved. Requests are made with the API key instead of your Plex account."
+            : "Optional. Only needed if signing in with Plex doesn't work. Found in Seerr under Settings, General."
+        }
+      >
+        <input
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          placeholder={hasKey ? "••••••••" : "Not set"}
+          className={inputClass}
+          type="password"
+          spellCheck={false}
+        />
+      </Row>
+      <div className="flex justify-end gap-2 px-5 py-4">
+        {hasKey && (
+          <Button variant="ghost" disabled={busy} onClick={() => connect(true)}>
+            Remove API key
+          </Button>
+        )}
+        {savedUrl && (
+          <Button variant="outline" disabled={busy} onClick={disconnect}>
+            Disconnect
+          </Button>
+        )}
+        <Button disabled={busy || !url.trim()} onClick={() => connect()}>
+          {busy && <Loader2 className="animate-spin" />}
+          {savedUrl && url === savedUrl && !apiKey ? "Test connection" : "Connect"}
+        </Button>
+      </div>
+    </>
   );
 }
