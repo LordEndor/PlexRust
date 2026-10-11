@@ -81,14 +81,29 @@ pub struct Subtitle {
     language: Option<String>,
 }
 
-/// The episode to offer when this one's credits start.
-#[derive(Serialize)]
+/// An episode of the same show: Up Next, the queue and the previous button.
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NextUp {
     rating_key: String,
     title: String,
     subtitle: String,
     thumb: Option<String>,
+    duration_ms: Option<u64>,
+    watched: bool,
+}
+
+impl From<Metadata> for NextUp {
+    fn from(n: Metadata) -> Self {
+        Self {
+            subtitle: episode_label(&n),
+            watched: n.view_count.unwrap_or_default() > 0,
+            duration_ms: n.duration,
+            rating_key: n.rating_key,
+            title: n.title,
+            thumb: n.thumb,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -112,6 +127,10 @@ pub struct PlaybackInfo {
     /// use and which otherwise can leave the screen black.
     strip_dolby_vision: bool,
     next: Option<NextUp>,
+    /// The episode before this one, for the previous button.
+    previous: Option<NextUp>,
+    /// Every episode after this one, in order; `next` is the first.
+    queue: Vec<NextUp>,
     /// The file's id on the server, for seek-bar thumbnails.
     part_id: Option<u64>,
     has_previews: bool,
@@ -198,16 +217,14 @@ pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_ke
         _ => item.year.map(|y| y.to_string()),
     };
 
-    // Missing next-episode info only costs the Up Next card, so errors are dropped.
-    let next = match item.kind.as_str() {
-        "episode" => state.plex.next_episode(&server, &item).await.ok().flatten().map(|n| NextUp {
-            subtitle: episode_label(&n),
-            rating_key: n.rating_key,
-            title: n.title,
-            thumb: n.thumb,
-        }),
-        _ => None,
+    // Missing episode info only costs the episode buttons and Up Next, so
+    // errors are dropped.
+    let (previous, queue) = match item.kind.as_str() {
+        "episode" => state.plex.episode_neighbours(&server, &item).await.unwrap_or_default(),
+        _ => Default::default(),
     };
+    let previous = previous.map(NextUp::from);
+    let queue: Vec<NextUp> = queue.into_iter().map(NextUp::from).collect();
 
     Ok(PlaybackInfo {
         url: state.plex.direct_url(&server, key),
@@ -221,7 +238,9 @@ pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_ke
         mpv_path: mpv_path(&app),
         log_path: log_path(&app),
         strip_dolby_vision,
-        next,
+        next: queue.first().cloned(),
+        previous,
+        queue,
         part_id: part.id,
         has_previews: part.indexes.as_deref() == Some("sd"),
         chapters: item.chapters.clone(),

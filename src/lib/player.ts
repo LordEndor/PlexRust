@@ -29,6 +29,16 @@ export interface PreviewInfo {
   intervalMs: number;
 }
 
+/** Another episode of the show being played. */
+export interface Episode {
+  ratingKey: string;
+  title: string;
+  subtitle: string;
+  thumb?: string | null;
+  durationMs?: number | null;
+  watched: boolean;
+}
+
 export interface PlaybackInfo {
   ratingKey: string;
   title: string;
@@ -41,7 +51,11 @@ export interface PlaybackInfo {
   mpvPath: string;
   logPath: string;
   stripDolbyVision: boolean;
-  next?: { ratingKey: string; title: string; subtitle: string; thumb?: string | null } | null;
+  next?: Episode | null;
+  /** The episode before this one in the show. */
+  previous?: Episode | null;
+  /** Every later episode of the show, in order; `next` is the first. */
+  queue: Episode[];
   partId?: number | null;
   hasPreviews: boolean;
   chapters: Chapter[];
