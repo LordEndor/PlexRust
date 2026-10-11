@@ -57,6 +57,10 @@ const MPV_ARGS = [
 ];
 
 const REPORT_EVERY_MS = 10_000;
+/** Give up on a file that hasn't started after this long and try transcoding. */
+const LOAD_TIMEOUT_MS = 45_000;
+/** What to fall back to when the original file won't play. */
+const FALLBACK = QUALITIES[1];
 const HIDE_CONTROLS_MS = 3000;
 
 interface Track {
@@ -95,6 +99,7 @@ export function Player({ ratingKey, resume, onClose }: Props) {
   const [fullscreen, setFullscreen] = useState(false);
   const [quality, setQuality] = useState<Quality>(QUALITIES[0]);
   const [controls, setControls] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Latest values for timers and cleanup, which outlive any one render.
   const live = useRef({ time: 0, duration: 0, paused: false, info: null as PlaybackInfo | null });
@@ -126,7 +131,8 @@ export function Player({ ratingKey, resume, onClose }: Props) {
         const pi = await playback.info(ratingKey);
         if (disposed) return;
         setInfo(pi);
-        const config: MpvConfig = { path: pi.mpvPath, args: MPV_ARGS, observedProperties: OBSERVED, ipcTimeoutMs: 5000 };
+        const args = pi.logPath ? [...MPV_ARGS, `--log-file=${pi.logPath}`] : MPV_ARGS;
+        const config: MpvConfig = { path: pi.mpvPath, args, observedProperties: OBSERVED, ipcTimeoutMs: 5000 };
         await init(config);
         if (disposed) return destroy();
 
@@ -163,9 +169,45 @@ export function Player({ ratingKey, resume, onClose }: Props) {
             }
           }),
         );
+        const start = resume ? pi.viewOffsetMs / 1000 : 0;
+        let loadTimer: number | undefined;
+        const load = async (url: string, at: number) => {
+          window.clearTimeout(loadTimer);
+          loadTimer = window.setTimeout(() => fail("it didn't start within 45 seconds"), LOAD_TIMEOUT_MS);
+          await setProperty<string>("start", at > 0 ? String(at) : "none");
+          await command("loadfile", [url]);
+        };
+        // When the original file won't play, retry once through Plex's
+        // transcoder before giving up.
+        const fail = async (reason: string) => {
+          window.clearTimeout(loadTimer);
+          if (disposed) return;
+          if (transcoding.current) {
+            setError(`Plex couldn't stream this either (${reason}). The mpv log is at ${pi.logPath}`);
+            return;
+          }
+          try {
+            const url = await playback.transcodeUrl(pi.ratingKey, FALLBACK.kbps!, FALLBACK.resolution!, session.current);
+            if (disposed) return;
+            transcoding.current = true;
+            setQuality(FALLBACK);
+            setNotice(`The original file wouldn't play (${reason}), so it's being transcoded to ${FALLBACK.label}.`);
+            window.setTimeout(() => setNotice(null), 8000);
+            await load(url, live.current.time || start);
+          } catch (e) {
+            if (!disposed) setError(errorMessage(e));
+          }
+        };
+        unlisten.push(() => window.clearTimeout(loadTimer));
+
         unlisten.push(
           await listenEvents((ev) => {
+            if (ev.event === "end-file" && ev.reason === "error") {
+              const detail = (ev as { file_error?: unknown }).file_error;
+              fail(typeof detail === "string" ? detail : "unknown error");
+            }
             if (ev.event === "file-loaded") {
+              window.clearTimeout(loadTimer);
               setBuffering(false);
               if (!transcoding.current) {
                 for (const s of pi.externalSubtitles) {
@@ -176,9 +218,7 @@ export function Player({ ratingKey, resume, onClose }: Props) {
           }),
         );
 
-        const start = resume ? pi.viewOffsetMs / 1000 : 0;
-        await setProperty<string>("start", start > 0 ? String(start) : "none");
-        await command("loadfile", [pi.url]);
+        await load(pi.url, start);
       } catch (e) {
         if (!disposed) setError(errorMessage(e));
       }
@@ -321,11 +361,17 @@ export function Player({ ratingKey, resume, onClose }: Props) {
         </div>
       )}
 
+      {notice && !error && (
+        <div className="pointer-events-none absolute inset-x-0 top-24 flex justify-center px-6">
+          <p className="max-w-lg rounded-xl bg-black/75 px-4 py-2.5 text-center text-sm text-white shadow-lg">{notice}</p>
+        </div>
+      )}
+
       {error && (
         <div className="absolute inset-0 grid place-items-center bg-black/80">
           <div className="flex max-w-md flex-col items-center gap-4 text-center">
             <p className="text-lg font-medium">Couldn't start playback</p>
-            <p className="text-muted-foreground text-sm">{error}</p>
+            <p className="text-muted-foreground text-sm break-all select-text">{error}</p>
             <Button onClick={onClose}>Back</Button>
           </div>
         </div>
