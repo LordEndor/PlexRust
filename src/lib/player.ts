@@ -66,7 +66,8 @@ export interface PlaybackInfo {
 export type PlaybackState = "playing" | "paused" | "stopped";
 
 export const playback = {
-  info: (ratingKey: string) => invoke<PlaybackInfo>("playback_info", { ratingKey }),
+  info: (ratingKey: string, playlist?: string) =>
+    invoke<PlaybackInfo>("playback_info", { ratingKey, playlist: playlist ?? null }),
   transcodeUrl: (ratingKey: string, maxBitrateKbps: number, resolution: string, session: string) =>
     invoke<string>("transcode_url", { ratingKey, maxBitrateKbps, resolution, offsetSecs: 0, session }),
   stopTranscode: (session: string) => invoke<void>("stop_transcode", { session }),

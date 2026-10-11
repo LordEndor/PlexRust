@@ -86,9 +86,11 @@ interface Props {
   resume: boolean;
   onClose: () => void;
   onPlayNext: (ratingKey: string) => void;
+  /** Played from this playlist: next and previous follow it. */
+  playlist?: string;
 }
 
-export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
+export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Props) {
   const { server } = useNav();
   const prefs = usePrefs();
   const [info, setInfo] = useState<WebPlaybackInfo | null>(null);
@@ -202,7 +204,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
 
     (async () => {
       try {
-        const [pi, prefs] = await Promise.all([getPlaybackInfo(ratingKey), loadPrefs()]);
+        const [pi, prefs] = await Promise.all([getPlaybackInfo(ratingKey, playlist), loadPrefs()]);
         if (disposed) return;
         setInfo(pi);
         const tracks = initialTracks(pi, prefs);
@@ -238,7 +240,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
       document.documentElement.classList.remove("playing");
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     };
-  }, [ratingKey, resume, report, startStream, stopStream]);
+  }, [ratingKey, resume, report, startStream, stopStream, playlist]);
 
   // Keep Plex's Continue Watching in step while playing.
   useEffect(() => {

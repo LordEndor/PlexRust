@@ -66,6 +66,8 @@ pub struct Prefs {
     pub hub_order: Vec<String>,
     /// Home rows turned off, by hub identifier.
     pub hidden_hubs: Vec<String>,
+    /// The last sort picked in each library, such as `addedAt:desc`, by section key.
+    pub library_sorts: BTreeMap<String, String>,
 }
 
 impl Default for Prefs {
@@ -81,6 +83,7 @@ impl Default for Prefs {
             show_featured: true,
             hub_order: Vec::new(),
             hidden_hubs: Vec::new(),
+            library_sorts: BTreeMap::new(),
         }
     }
 }

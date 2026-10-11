@@ -11,11 +11,11 @@ const POSTER = { w: 180, h: 270 };
 const WIDE = { w: 320, h: 180 };
 
 function posterPath(m: Metadata) {
-  return m.type === "episode" ? (m.grandparentThumb ?? m.thumb) : (m.thumb ?? m.parentThumb);
+  return m.type === "episode" ? (m.grandparentThumb ?? m.thumb) : (m.thumb ?? m.parentThumb ?? m.composite);
 }
 
 function widePath(m: Metadata) {
-  return m.type === "episode" ? (m.thumb ?? m.grandparentArt) : (m.art ?? m.thumb);
+  return m.type === "episode" ? (m.thumb ?? m.grandparentArt) : (m.art ?? m.thumb ?? m.composite);
 }
 
 export function ProgressBar({ value, className }: { value: number; className?: string }) {
@@ -63,7 +63,13 @@ export function Poster({ item, wide, className, continueWatching }: Props) {
   return (
     <ItemContextMenu item={item} continueWatching={continueWatching}>
       <button
-        onClick={() => navigate({ name: "item", ratingKey: item.ratingKey })}
+        onClick={() =>
+          navigate(
+            item.type === "playlist"
+              ? { name: "playlist", ratingKey: item.ratingKey }
+              : { name: "item", ratingKey: item.ratingKey },
+          )
+        }
         className={cn("group flex w-full flex-col gap-2 text-left outline-none", className)}
       >
         <div

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::client::PlexClient;
@@ -14,6 +16,10 @@ pub struct Metadata {
     pub kind: String,
     pub title: String,
     pub title_sort: Option<String>,
+    pub original_title: Option<String>,
+    /// Such as "Director's Cut", for movies with several editions.
+    pub edition_title: Option<String>,
+    pub library_section_title: Option<String>,
     pub parent_rating_key: Option<String>,
     pub grandparent_rating_key: Option<String>,
     pub parent_title: Option<String>,
@@ -26,6 +32,8 @@ pub struct Metadata {
     pub parent_thumb: Option<String>,
     pub grandparent_thumb: Option<String>,
     pub grandparent_art: Option<String>,
+    /// A playlist's poster, a mosaic of what's in it.
+    pub composite: Option<String>,
     /// Milliseconds.
     pub duration: Option<u64>,
     /// Resume position in milliseconds.
@@ -43,15 +51,36 @@ pub struct Metadata {
     pub content_rating: Option<String>,
     pub rating: Option<f64>,
     pub audience_rating: Option<f64>,
+    /// The account's own star rating, 0 to 10.
+    pub user_rating: Option<f64>,
     pub studio: Option<String>,
     pub originally_available_at: Option<String>,
     pub added_at: Option<i64>,
+    /// Unix seconds.
+    pub updated_at: Option<i64>,
+    /// Unix seconds.
+    pub last_viewed_at: Option<i64>,
+    /// For playlists: `video`, `audio` or `photo`.
+    pub playlist_type: Option<String>,
     #[serde(rename = "Genre")]
     pub genre: Vec<Tag>,
     #[serde(rename = "Director")]
     pub director: Vec<Tag>,
     #[serde(rename = "Role")]
     pub role: Vec<Tag>,
+    #[serde(rename = "Writer")]
+    pub writer: Vec<Tag>,
+    #[serde(rename = "Producer")]
+    pub producer: Vec<Tag>,
+    #[serde(rename = "Country")]
+    pub country: Vec<Tag>,
+    #[serde(rename = "Collection")]
+    pub collection: Vec<Tag>,
+    #[serde(rename = "Label")]
+    pub label: Vec<Tag>,
+    /// IDs in other databases, such as `imdb://tt0369339` (needs `includeGuids=1`).
+    #[serde(rename = "Guid")]
+    pub guids: Vec<Guid>,
     #[serde(rename = "Media")]
     pub media: Vec<Media>,
     /// Intro and credits markers (needs `includeMarkers=1`).
@@ -98,9 +127,23 @@ pub struct Tag {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Guid {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Media {
     pub video_resolution: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub aspect_ratio: Option<f64>,
+    /// Such as `24p` or `PAL`.
+    pub video_frame_rate: Option<String>,
+    pub video_profile: Option<String>,
+    /// Milliseconds.
+    pub duration: Option<u64>,
     /// Overall bitrate in kbps.
     pub bitrate: Option<u32>,
     pub video_codec: Option<String>,
@@ -120,6 +163,8 @@ pub struct Part {
     pub key: Option<String>,
     pub file: Option<String>,
     pub size: Option<u64>,
+    /// Milliseconds.
+    pub duration: Option<u64>,
     pub container: Option<String>,
     /// `sd` when the server has generated seek-bar thumbnails for this file.
     pub indexes: Option<String>,
@@ -145,6 +190,23 @@ pub struct Stream {
     /// Set for subtitles stored next to the video rather than inside it.
     pub key: Option<String>,
     pub forced: Option<bool>,
+    pub default: Option<bool>,
+    /// Codec profile, such as `main 10` or `dts-hd ma`.
+    pub profile: Option<String>,
+    pub bit_depth: Option<u8>,
+    pub frame_rate: Option<f64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// `bt2020` for HDR.
+    pub color_primaries: Option<String>,
+    /// `smpte2084` for HDR10 and Dolby Vision, `arib-std-b67` for HLG.
+    pub color_trc: Option<String>,
+    pub chroma_subsampling: Option<String>,
+    pub channels: Option<u32>,
+    /// Such as `5.1(side)`.
+    pub audio_channel_layout: Option<String>,
+    /// Hz.
+    pub sampling_rate: Option<u32>,
     /// Dolby Vision profile of a video stream, when it has one.
     #[serde(rename = "DOVIProfile")]
     pub dovi_profile: Option<u8>,
@@ -231,6 +293,11 @@ impl Filters {
         q
     }
 
+    /// Whether a listing has to be fetched whole and paged locally.
+    pub fn needs_whole_library(&self, sort: &str) -> bool {
+        self.min_bitrate_kbps.is_some() || sort.starts_with("random")
+    }
+
     /// Whether `item` passes the filters Plex can't apply.
     pub fn keeps(&self, item: &Metadata) -> bool {
         self.min_bitrate_kbps
@@ -256,13 +323,64 @@ impl PlexClient {
         let c = self
             .container(server, "/hubs", &[("count", "20"), ("includeLibraryPlaylists", "0")])
             .await?;
-        Ok(c.hub.into_iter().filter(|h| !h.metadata.is_empty()).collect())
+        let mut hubs = c.hub;
+        drop_on_deck_duplicates(&mut hubs);
+        Ok(hubs.into_iter().filter(|h| !h.metadata.is_empty()).collect())
+    }
+
+    /// How many items a library holds: its movies or shows, or with `kind`
+    /// another Plex type, such as 4 for a show library's episodes.
+    pub async fn section_total(&self, server: &ServerConnection, section: &str, kind: Option<u8>) -> Result<u32> {
+        let kind = kind.map(|k| k.to_string());
+        let mut query = vec![("X-Plex-Container-Start", "0"), ("X-Plex-Container-Size", "0")];
+        if let Some(k) = &kind {
+            query.push(("type", k));
+        }
+        let c = self
+            .container(server, &format!("/library/sections/{section}/all"), &query)
+            .await?;
+        Ok(c.total_size.or(c.size).unwrap_or_default())
+    }
+
+    /// The account's video playlists.
+    pub async fn playlists(&self, server: &ServerConnection) -> Result<Vec<Metadata>> {
+        let c = self.container(server, "/playlists", &[("playlistType", "video")]).await?;
+        Ok(c.metadata)
+    }
+
+    /// One playlist's own details: title, poster, length.
+    pub async fn playlist(&self, server: &ServerConnection, playlist: &str) -> Result<Option<Metadata>> {
+        let c = self.container(server, &format!("/playlists/{playlist}"), &[]).await?;
+        Ok(c.metadata.into_iter().next())
+    }
+
+    /// What's in a playlist, in its order.
+    pub async fn playlist_items(&self, server: &ServerConnection, playlist: &str) -> Result<Vec<Metadata>> {
+        let c = self.container(server, &format!("/playlists/{playlist}/items"), &[]).await?;
+        Ok(c.metadata)
+    }
+
+    /// The items around `item` in a playlist: the one before it and every
+    /// one after it.
+    pub async fn playlist_neighbours(
+        &self,
+        server: &ServerConnection,
+        playlist: &str,
+        item: &str,
+    ) -> Result<(Option<Metadata>, Vec<Metadata>)> {
+        let mut all = self.playlist_items(server, playlist).await?;
+        let Some(at) = all.iter().position(|m| m.rating_key == item) else {
+            return Ok((None, Vec::new()));
+        };
+        let after = all.split_off(at + 1);
+        all.pop();
+        Ok((all.pop(), after))
     }
 
     /// A page of a library section (`page` is start and size), sorted by
-    /// `sort` and narrowed down by `filters`. With a bitrate filter the whole
-    /// matching library comes back in one go, since Plex can't page through a
-    /// filter it doesn't apply.
+    /// `sort` and narrowed down by `filters`. With a bitrate filter or random
+    /// order the whole matching library comes back in one go: Plex can't page
+    /// through a filter it doesn't apply, and shuffles again for every page.
     pub async fn section_filtered(
         &self,
         server: &ServerConnection,
@@ -273,7 +391,7 @@ impl PlexClient {
     ) -> Result<Page> {
         let mut query: Vec<(&str, String)> = vec![("sort", sort.to_owned())];
         query.extend(filters.query());
-        if let Some((start, size)) = page.filter(|_| filters.min_bitrate_kbps.is_none()) {
+        if let Some((start, size)) = page.filter(|_| !filters.needs_whole_library(sort)) {
             query.push(("X-Plex-Container-Start", start.to_string()));
             query.push(("X-Plex-Container-Size", size.to_string()));
         }
@@ -281,7 +399,7 @@ impl PlexClient {
         let c = self
             .container(server, &format!("/library/sections/{section}/all"), &query)
             .await?;
-        if filters.min_bitrate_kbps.is_some() {
+        if filters.needs_whole_library(sort) {
             let items: Vec<Metadata> = c.metadata.into_iter().filter(|m| filters.keeps(m)).collect();
             let total = items.len() as u32;
             return Ok(Page { items, total });
@@ -325,7 +443,7 @@ impl PlexClient {
     /// Full details for one item, including cast, genres and media info.
     pub async fn metadata(&self, server: &ServerConnection, rating_key: &str) -> Result<Option<Metadata>> {
         let c = self
-            .container(server, &format!("/library/metadata/{rating_key}"), &[("includeMarkers", "1"), ("includeChapters", "1")])
+            .container(server, &format!("/library/metadata/{rating_key}"), &[("includeMarkers", "1"), ("includeChapters", "1"), ("includeGuids", "1")])
             .await?;
         Ok(c.metadata.into_iter().next())
     }
@@ -374,7 +492,26 @@ impl PlexClient {
     }
 }
 
-/// The item with the lowest `index` above `after`.
+/// Takes out of On Deck whatever Continue Watching already shows: the same
+/// item, or another episode of a show being watched part way through.
+fn drop_on_deck_duplicates(hubs: &mut [Hub]) {
+    let id = |h: &Hub| h.hub_identifier.to_ascii_lowercase();
+    let Some(continuing) = hubs.iter().find(|h| id(h).contains("continue")) else {
+        return;
+    };
+    let keys: HashSet<String> = continuing
+        .metadata
+        .iter()
+        .flat_map(|m| [Some(m.rating_key.clone()), m.grandparent_rating_key.clone()])
+        .flatten()
+        .collect();
+    for hub in hubs.iter_mut().filter(|h| id(h).contains("ondeck")) {
+        hub.metadata.retain(|m| {
+            !keys.contains(&m.rating_key) && !m.grandparent_rating_key.as_ref().is_some_and(|g| keys.contains(g))
+        });
+    }
+}
+
 /// The episode to play next in a show or season, Plex's "on deck": one
 /// that is part way through, else the one after the last watched, else the
 /// first. `None` once everything has been watched.
@@ -512,5 +649,68 @@ mod tests {
         let out = serde_json::to_value(&body.container.hub[0].metadata[0]).unwrap();
         assert_eq!(out["ratingKey"], "1");
         assert_eq!(out["type"], "movie");
+    }
+
+    #[test]
+    fn on_deck_skips_what_continue_watching_shows() {
+        let item = |key: &str, show: Option<&str>| Metadata {
+            rating_key: key.into(),
+            grandparent_rating_key: show.map(Into::into),
+            ..Default::default()
+        };
+        let hub = |id: &str, items: Vec<Metadata>| Hub { hub_identifier: id.into(), metadata: items, ..Default::default() };
+        let mut hubs = vec![
+            hub("home.continue", vec![item("movie1", None), item("s1e3", Some("show1"))]),
+            hub(
+                "home.ondeck",
+                vec![item("movie1", None), item("s1e4", Some("show1")), item("s2e1", Some("show2")), item("movie2", None)],
+            ),
+            hub("home.movies.recent", vec![item("movie1", None)]),
+        ];
+        drop_on_deck_duplicates(&mut hubs);
+        let keys = |h: &Hub| h.metadata.iter().map(|m| m.rating_key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&hubs[1]), ["s2e1", "movie2"]);
+        // Other rows are left alone.
+        assert_eq!(keys(&hubs[2]), ["movie1"]);
+    }
+
+    #[test]
+    fn random_order_and_bitrate_fetch_the_whole_library() {
+        let f = Filters::default();
+        assert!(f.needs_whole_library("random"));
+        assert!(!f.needs_whole_library("addedAt:desc"));
+        let f = Filters { min_bitrate_kbps: Some(1), ..Default::default() };
+        assert!(f.needs_whole_library("titleSort"));
+    }
+
+    #[test]
+    fn parses_info_fields() {
+        let json = r#"{"MediaContainer":{"Metadata":[{"ratingKey":"9","type":"movie","title":"Collateral",
+            "originalTitle":"Kollateral","editionTitle":"Director's Cut","userRating":8.0,"lastViewedAt":1700000000,
+            "Guid":[{"id":"imdb://tt0369339"}],"Writer":[{"tag":"Stuart Beattie"}],"Country":[{"tag":"USA"}],
+            "Media":[{"width":3840,"height":1608,"aspectRatio":2.35,"videoFrameRate":"24p","Part":[{"duration":7200000,"Stream":[
+                {"streamType":1,"codec":"hevc","bitDepth":10,"frameRate":23.976,"colorPrimaries":"bt2020","colorTrc":"smpte2084"},
+                {"streamType":2,"codec":"truehd","channels":8,"audioChannelLayout":"7.1","samplingRate":48000,"default":true}]}]}]}]}}"#;
+        let body: Body = serde_json::from_str(json).unwrap();
+        let m = &body.container.metadata[0];
+        assert_eq!(m.guids[0].id, "imdb://tt0369339");
+        assert_eq!(m.writer[0].tag, "Stuart Beattie");
+        assert_eq!(m.media[0].height, Some(1608));
+        let streams = &m.media[0].part[0].stream;
+        assert_eq!(streams[0].bit_depth, Some(10));
+        assert_eq!(streams[0].color_trc.as_deref(), Some("smpte2084"));
+        assert_eq!(streams[1].channels, Some(8));
+    }
+
+    #[test]
+    fn parses_playlist() {
+        let json = r#"{"MediaContainer":{"size":1,"Metadata":[{"ratingKey":"55","key":"/playlists/55/items",
+            "type":"playlist","title":"Marvel order","playlistType":"video","smart":false,"leafCount":12,
+            "composite":"/playlists/55/composite/1700000000","duration":86400000}]}}"#;
+        let body: Body = serde_json::from_str(json).unwrap();
+        let p = &body.container.metadata[0];
+        assert_eq!(p.kind, "playlist");
+        assert_eq!(p.leaf_count, Some(12));
+        assert_eq!(p.composite.as_deref(), Some("/playlists/55/composite/1700000000"));
     }
 }

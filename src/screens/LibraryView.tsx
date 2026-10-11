@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronDown, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, X } from "lucide-react";
 
 import { Poster } from "@/components/Poster";
 import { Button } from "@/components/ui/button";
@@ -8,25 +8,62 @@ import {
   DropdownMenu,
   DropdownMenuCheckItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLibraryChanged } from "@/lib/changes";
 import { errorMessage, library, type FilterValue, type Filters, type LibrarySection, type Metadata } from "@/lib/api";
-import { posterSize, usePrefs } from "@/lib/prefs";
+import { posterSize, savePrefs, usePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 
 const PAGE = 120;
 const GAP = 20;
 const CAPTION = 44;
 
-const SORTS = [
-  { key: "titleSort", label: "A–Z" },
-  { key: "addedAt:desc", label: "Recently added" },
-  { key: "originallyAvailableAt:desc", label: "Newest" },
-  { key: "audienceRating:desc", label: "Top rated" },
+interface SortOption {
+  /** Plex's sort field; `:desc` is added for descending. */
+  key: string;
+  label: string;
+  /** The direction a first pick sorts in. */
+  desc: boolean;
+  /** Only for movie libraries, or only for show libraries. */
+  only?: "movie" | "show";
+}
+
+/** The same choices, order and defaults as Plex's own Sort menu. */
+const SORTS: SortOption[] = [
+  { key: "titleSort", label: "Title", desc: false },
+  { key: "year", label: "Year", desc: true },
+  { key: "originallyAvailableAt", label: "Release Date", desc: true },
+  { key: "rating", label: "Critic Rating", desc: true },
+  { key: "audienceRating", label: "Audience Rating", desc: true },
+  { key: "userRating", label: "Rating", desc: true },
+  { key: "contentRating", label: "Content Rating", desc: false },
+  { key: "duration", label: "Duration", desc: true, only: "movie" },
+  { key: "viewOffset", label: "Progress", desc: true, only: "movie" },
+  { key: "viewCount", label: "Plays", desc: true, only: "movie" },
+  { key: "unviewedLeafCount", label: "Unwatched Episodes", desc: true, only: "show" },
+  { key: "addedAt", label: "Date Added", desc: true },
+  { key: "episode.addedAt", label: "Last Episode Added", desc: true, only: "show" },
+  { key: "lastViewedAt", label: "Date Viewed", desc: true },
+  { key: "mediaHeight", label: "Resolution", desc: true, only: "movie" },
+  { key: "mediaBitrate", label: "Bitrate", desc: true, only: "movie" },
+  { key: "random", label: "Randomly", desc: false },
 ];
+
+const DEFAULT_SORT = "titleSort";
+
+function parseSort(sort: string) {
+  const [key, dir] = sort.split(":");
+  return { option: SORTS.find((s) => s.key === key), desc: dir === "desc" };
+}
+
+/** "63 movies", "1 show". */
+function countLabel(n: number, [one, many]: readonly [string, string]) {
+  return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+}
 
 const RESOLUTIONS: FilterValue[] = [
   { key: "4k", title: "4K" },
@@ -115,7 +152,14 @@ function CollectionsGrid({
 function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React.ReactNode }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const [sort, setSort] = useState(SORTS[0].key);
+  const prefs = usePrefs();
+  // Remembered per library. Nothing loads until the saved pick is known, so
+  // the grid doesn't load once in the default order first.
+  const savedSort = prefs?.librarySorts?.[section.key];
+  const sort = savedSort && parseSort(savedSort).option ? savedSort : DEFAULT_SORT;
+  const setSort = (next: string) =>
+    savePrefs({ librarySorts: { ...prefs?.librarySorts, [section.key]: next } }).catch(() => {});
+  const [counts, setCounts] = useState<{ all: number; episodes?: number } | null>(null);
   const [filters, setFilters] = useState<Filters>({});
   const [genres, setGenres] = useState<FilterValue[]>([]);
   const [decades, setDecades] = useState<FilterValue[]>([]);
@@ -159,10 +203,20 @@ function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React
   // Watched state changed somewhere: reload what's on screen, keeping the
   // scroll position. An unwatched filter can drop items, so counts refresh too.
   useLibraryChanged(() => {
+    loadCounts();
     const pages = [...requested.current];
     requested.current = new Set();
     pages.forEach((p) => loadPage(p));
   });
+
+  // The library's size, unfiltered, and for shows how many episodes they hold.
+  const loadCounts = useCallback(() => {
+    const shows = section.type === "show";
+    Promise.all([library.sectionCount(section.key), shows ? library.sectionCount(section.key, 4) : undefined])
+      .then(([all, episodes]) => setCounts({ all, episodes }))
+      .catch(() => setCounts(null));
+  }, [section.key, section.type]);
+  useEffect(loadCounts, [loadCounts]);
 
   useEffect(() => {
     library.filterValues(section.key, "genre").then(setGenres, () => setGenres([]));
@@ -174,16 +228,17 @@ function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React
   // Resolution and bitrate belong to files, which shows only have per episode.
   const movies = section.type === "movie";
 
+  const ready = prefs !== null;
   useEffect(() => {
     requested.current = new Set();
     setItems([]);
     setTotal(null);
     setError(null);
     scrollRef.current?.scrollTo({ top: 0 });
-    loadPage(0);
-  }, [loadPage]);
+    if (ready) loadPage(0);
+  }, [loadPage, ready]);
 
-  const minCol = posterSize(usePrefs()).poster;
+  const minCol = posterSize(prefs).poster;
   const cols = Math.max(2, Math.floor((width + GAP) / (minCol + GAP)));
   const colWidth = width > 0 ? (width - GAP * (cols - 1)) / cols : minCol;
   const rowHeight = colWidth * 1.5 + CAPTION + GAP;
@@ -200,33 +255,28 @@ function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React
 
   const virtualRows = virtualizer.getVirtualItems();
   useEffect(() => {
-    if (!virtualRows.length) return;
+    if (!virtualRows.length || !ready) return;
     const first = virtualRows[0].index * cols;
     const last = (virtualRows[virtualRows.length - 1].index + 1) * cols - 1;
     for (let p = Math.floor(first / PAGE); p <= Math.floor(last / PAGE); p++) loadPage(p);
-  }, [virtualRows, cols, loadPage]);
+  }, [virtualRows, cols, loadPage, ready]);
+
+  const noun = section.type === "show" ? (["show", "shows"] as const) : (["movie", "movies"] as const);
+  const all = counts?.all ?? (filtered ? null : total);
+  let count: string | null = null;
+  if (filtered && total !== null && all != null) count = `${total.toLocaleString()} of ${countLabel(all, noun)}`;
+  else if (all != null) count = countLabel(all, noun);
+  if (count && counts?.episodes != null && !filtered) count += ` · ${countLabel(counts.episodes, ["episode", "episodes"])}`;
 
   return (
     <div ref={scrollRef} className="h-full overflow-y-auto px-8 pb-8">
       <header className="bg-background/95 sticky top-0 z-10 -mx-8 mb-4 flex items-center gap-3 px-8 py-4 backdrop-blur">
         <h1 className="flex-1 text-2xl font-semibold">
           {section.title}
-          {total !== null && <span className="text-muted-foreground ml-3 text-sm font-normal">{total} items</span>}
+          {count && <span className="text-muted-foreground ml-3 text-sm font-normal">{count}</span>}
         </h1>
         {toggle}
-        <div className="bg-card flex gap-1 rounded-lg border p-1">
-          {SORTS.map((s) => (
-            <Button
-              key={s.key}
-              size="sm"
-              variant={s.key === sort ? "secondary" : "ghost"}
-              className="h-7"
-              onClick={() => setSort(s.key)}
-            >
-              {s.label}
-            </Button>
-          ))}
-        </div>
+        <SortMenu sort={sort} kind={section.type} onChange={setSort} />
       </header>
 
       <div className="-mt-2 mb-5 flex flex-wrap items-center gap-2">
@@ -297,6 +347,43 @@ function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React
         ))}
       </div>
     </div>
+  );
+}
+
+function SortMenu({ sort, kind, onChange }: { sort: string; kind: string; onChange: (sort: string) => void }) {
+  const { option, desc } = parseSort(sort);
+  const Arrow = desc ? ArrowDown : ArrowUp;
+  const options = SORTS.filter((s) => !s.only || s.only === kind);
+  const pick = (s: SortOption) => {
+    // Picking the current sort again flips its direction.
+    const nextDesc = s === option ? !desc : s.desc;
+    onChange(s.key === "random" || !nextDesc ? s.key : `${s.key}:desc`);
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" className="h-8">
+          By {option?.label ?? "Title"}
+          {option?.key !== "random" && <Arrow className="opacity-70" />}
+          <ChevronDown className="opacity-60" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-[70vh] min-w-52 overflow-y-auto">
+        {options.map((s) => {
+          const active = s === option;
+          return (
+            <DropdownMenuItem
+              key={s.key}
+              onSelect={() => pick(s)}
+              className={cn("justify-between", active && "text-primary focus:text-primary")}
+            >
+              {s.label}
+              {active && s.key !== "random" && <Arrow className="text-primary" />}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
