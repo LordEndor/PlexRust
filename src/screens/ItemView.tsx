@@ -21,6 +21,7 @@ import { episodeLabel, formatDuration, isWatched, progress, resolutionLabel } fr
 import { useNav } from "@/lib/nav";
 import { formatTime } from "@/lib/player";
 import { posterSize, usePrefs } from "@/lib/prefs";
+import { PlaylistView } from "@/screens/PlaylistView";
 
 export function ItemView({ ratingKey }: { ratingKey: string }) {
   const [item, setItem] = useState<Metadata | null>(null);
@@ -69,6 +70,7 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
 
   if (error) return <p className="text-destructive p-8 text-sm">{error}</p>;
   if (!item) return <HeroSkeleton />;
+  if (item.type === "playlist") return <PlaylistView ratingKey={ratingKey} />;
 
   return (
     <div className="h-full overflow-y-auto">

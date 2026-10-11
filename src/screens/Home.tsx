@@ -6,6 +6,7 @@ import {
   Film,
   Home as HomeIcon,
   Image,
+  ListVideo,
   LogOut,
   Music,
   PanelLeftClose,
@@ -28,6 +29,7 @@ import { HomeView } from "@/screens/HomeView";
 import { DiscoverView } from "@/screens/DiscoverView";
 import { ItemView } from "@/screens/ItemView";
 import { LibraryView } from "@/screens/LibraryView";
+import { PlaylistsView, PlaylistView } from "@/screens/PlaylistView";
 import { Player } from "@/screens/Player";
 import { RequestsView } from "@/screens/RequestsView";
 import { RequestView } from "@/screens/RequestView";
@@ -103,7 +105,12 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   const goRoot = (route: Route) => setStack([route]);
   // The next episode replaces the current one, so Back still leads to where playback started.
   const playNext = useCallback(
-    (ratingKey: string) => setStack((s) => [...s.slice(0, -1), { name: "player", ratingKey, resume: false }]),
+    (ratingKey: string) =>
+      setStack((s) => {
+        const top = s[s.length - 1];
+        const playlist = top.name === "player" ? top.playlist : undefined;
+        return [...s.slice(0, -1), { name: "player", ratingKey, resume: false, playlist }];
+      }),
     [],
   );
 
@@ -176,6 +183,13 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
                   onClick={() => goRoot({ name: "library", section: s })}
                 />
               ))}
+          <NavItem
+            icon={ListVideo}
+            label="Playlists"
+            collapsed={collapsed}
+            active={root.name === "playlists"}
+            onClick={() => goRoot({ name: "playlists" })}
+          />
           {requestsEnabled && (
             <NavItem
               icon={Compass}
@@ -238,7 +252,14 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
             )}
           </main>
           {top.name === "player" && (
-            <Player key={top.ratingKey} ratingKey={top.ratingKey} resume={top.resume} onClose={back} onPlayNext={playNext} />
+            <Player
+              key={top.ratingKey}
+              ratingKey={top.ratingKey}
+              resume={top.resume}
+              playlist={top.playlist}
+              onClose={back}
+              onPlayNext={playNext}
+            />
           )}
         </div>
       </div>
@@ -264,6 +285,10 @@ function Screen({ route }: { route: Route }) {
       return <RequestView mediaType={route.mediaType} tmdbId={route.tmdbId} />;
     case "requests":
       return <RequestsView />;
+    case "playlists":
+      return <PlaylistsView />;
+    case "playlist":
+      return <PlaylistView ratingKey={route.ratingKey} />;
     case "player":
       return null;
   }

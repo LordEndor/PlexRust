@@ -38,6 +38,8 @@ export function subtitle(m: Metadata) {
       return `${m.grandparentTitle ?? ""} · ${episodeLabel(m)}`;
     case "season":
       return m.parentTitle ?? "";
+    case "playlist":
+      return m.leafCount ? `${m.leafCount} item${m.leafCount === 1 ? "" : "s"}` : "Playlist";
     case "collection":
       return m.childCount ? `${m.childCount} item${m.childCount === 1 ? "" : "s"}` : "Collection";
     case "show":

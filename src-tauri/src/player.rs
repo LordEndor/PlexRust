@@ -81,7 +81,8 @@ pub struct Subtitle {
     language: Option<String>,
 }
 
-/// An episode of the same show: Up Next, the queue and the previous button.
+/// An episode of the same show, or the next item of a playlist: Up Next,
+/// the queue and the previous button.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NextUp {
@@ -96,7 +97,10 @@ pub struct NextUp {
 impl From<Metadata> for NextUp {
     fn from(n: Metadata) -> Self {
         Self {
-            subtitle: episode_label(&n),
+            subtitle: match n.kind.as_str() {
+                "episode" => episode_label(&n),
+                _ => n.year.map(|y| y.to_string()).unwrap_or_default(),
+            },
             watched: n.view_count.unwrap_or_default() > 0,
             duration_ms: n.duration,
             rating_key: n.rating_key,
@@ -173,7 +177,12 @@ fn episode_label(item: &Metadata) -> String {
 }
 
 #[tauri::command]
-pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_key: String) -> CmdResult<PlaybackInfo> {
+pub async fn playback_info(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    rating_key: String,
+    playlist: Option<String>,
+) -> CmdResult<PlaybackInfo> {
     let server = current_server(&state).await?;
     let item = state
         .plex
@@ -218,9 +227,10 @@ pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_ke
     };
 
     // Missing episode info only costs the episode buttons and Up Next, so
-    // errors are dropped.
-    let (previous, queue) = match item.kind.as_str() {
-        "episode" => state.plex.episode_neighbours(&server, &item).await.unwrap_or_default(),
+    // errors are dropped. Played from a playlist, the playlist is the queue.
+    let (previous, queue) = match (&playlist, item.kind.as_str()) {
+        (Some(p), _) => state.plex.playlist_neighbours(&server, p, &item.rating_key).await.unwrap_or_default(),
+        (None, "episode") => state.plex.episode_neighbours(&server, &item).await.unwrap_or_default(),
         _ => Default::default(),
     };
     let previous = previous.map(NextUp::from);

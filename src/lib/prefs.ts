@@ -22,6 +22,8 @@ export interface Prefs {
   hubOrder: string[];
   /** Home rows turned off, by hub identifier. */
   hiddenHubs: string[];
+  /** The last sort picked in each library, such as `addedAt:desc`, by section key. */
+  librarySorts: Record<string, string>;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -35,6 +37,7 @@ export const DEFAULT_PREFS: Prefs = {
   showFeatured: true,
   hubOrder: [],
   hiddenHubs: [],
+  librarySorts: {},
 };
 
 // One copy for the whole app, so the settings page and the player agree.

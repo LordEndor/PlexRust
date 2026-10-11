@@ -262,7 +262,7 @@ function hubs(c: Container): Hub[] {
 }
 
 async function metadataRaw(ratingKey: string) {
-  const c = await container(`/library/metadata/${ratingKey}`, { includeMarkers: 1 });
+  const c = await container(`/library/metadata/${ratingKey}`, { includeMarkers: 1, includeGuids: 1 });
   const item = c.Metadata?.[0];
   if (!item) throw new Error("That item no longer exists on the server");
   return item;
@@ -298,7 +298,7 @@ function episode(m: Metadata): Episode {
   return {
     ratingKey: m.ratingKey,
     title: m.title,
-    subtitle: episodeLabel(m),
+    subtitle: m.type === "episode" ? episodeLabel(m) : (m.year?.toString() ?? ""),
     thumb: m.thumb,
     durationMs: m.duration,
     watched: (m.viewCount ?? 0) > 0,
@@ -323,6 +323,41 @@ function upNext(episodes: Metadata[]): Metadata | undefined {
   if (last < 0) return list[0];
   if (started(list[last])) return list[last];
   return list.slice(last + 1).find((m) => !watched(m));
+}
+
+/** The items around `ratingKey` in a playlist: the one before it and every one after it. */
+async function playlistNeighbours(playlist: string, ratingKey: string): Promise<Neighbours> {
+  const all = await playlistItems(playlist);
+  const at = all.findIndex((m) => m.ratingKey === ratingKey);
+  if (at < 0) return { after: [] };
+  return { previous: all[at - 1], after: all.slice(at + 1) };
+}
+
+async function playlistItems(playlist: string): Promise<Metadata[]> {
+  return ((await container(`/playlists/${playlist}/items`)).Metadata ?? []).map(meta);
+}
+
+/**
+ * Takes out of On Deck whatever Continue Watching already shows: the same
+ * item, or another episode of a show being watched part way through.
+ */
+function dropOnDeckDuplicates(list: Hub[]): Hub[] {
+  const id = (h: Hub) => h.hubIdentifier.toLowerCase();
+  const continuing = list.find((h) => id(h).includes("continue"));
+  if (!continuing) return list;
+  const keys = new Set(continuing.Metadata.flatMap((m) => [m.ratingKey, m.grandparentRatingKey ?? ""]).filter(Boolean));
+  return list
+    .map((h) =>
+      id(h).includes("ondeck")
+        ? {
+            ...h,
+            Metadata: h.Metadata.filter(
+              (m) => !keys.has(m.ratingKey) && !(m.grandparentRatingKey && keys.has(m.grandparentRatingKey)),
+            ),
+          }
+        : h,
+    )
+    .filter((h) => h.Metadata.length > 0);
 }
 
 function episodeLabel(m: Metadata) {
@@ -409,14 +444,19 @@ export function timelineUrl(ratingKey: string, state: string, timeMs: number, du
   );
 }
 
-async function playbackInfo(ratingKey: string): Promise<WebPlaybackInfo> {
+async function playbackInfo(ratingKey: string, playlist?: string | null): Promise<WebPlaybackInfo> {
   const item = await metadataRaw(ratingKey);
   const part = item.Media?.[0]?.Part?.[0];
   if (!part?.key) throw new Error("This item has no playable file");
   const streams = part.Stream ?? [];
   const m = meta(item);
   const none: Neighbours = { after: [] };
-  const around = m.type === "episode" ? await episodeNeighbours(m).catch(() => none) : none;
+  // Played from a playlist, the playlist is the queue.
+  const around = playlist
+    ? await playlistNeighbours(playlist, m.ratingKey).catch(() => none)
+    : m.type === "episode"
+      ? await episodeNeighbours(m).catch(() => none)
+      : none;
   const queue = around.after.map(episode);
   return {
     ratingKey: m.ratingKey,
@@ -451,7 +491,7 @@ export const getPlaybackInfo = playbackInfo;
 
 type Args = Record<string, unknown>;
 
-/** The last bitrate-filtered library, paged through locally. */
+/** The last bitrate-filtered or shuffled library, paged through locally. */
 let bitrateCache: { key: string; items: Metadata[] } | null = null;
 type Command = (args: Args) => Promise<unknown>;
 
@@ -513,7 +553,7 @@ const commands: Record<string, Command> = {
   },
 
   async home_hubs(): Promise<Hub[]> {
-    return hubs(await container("/hubs", { count: 20, includeLibraryPlaylists: 0 }));
+    return dropOnDeckDuplicates(hubs(await container("/hubs", { count: 20, includeLibraryPlaylists: 0 })));
   },
 
   async section_items({ section, start, size, sort, filters }): Promise<Page> {
@@ -524,14 +564,16 @@ const commands: Record<string, Command> = {
     if (f.resolution) params.resolution = f.resolution;
     if (f.unwatched) params.unwatched = 1;
     const [from, count] = [start as number, size as number];
-    // Plex can't filter on bitrate: fetch the matching library and page here.
-    if (f.minBitrateKbps) {
-      const min = f.minBitrateKbps;
+    // Plex can't filter on bitrate, and shuffles anew for every page: fetch
+    // the matching library once and page here. Random reshuffles from the top.
+    const random = (sort as string).startsWith("random");
+    if (f.minBitrateKbps || random) {
+      const min = f.minBitrateKbps ?? 0;
       const key = JSON.stringify([section, sort, f]);
-      if (bitrateCache?.key !== key) {
+      if (bitrateCache?.key !== key || (random && from === 0)) {
         const all = ((await container(`/library/sections/${section}/all`, params)).Metadata ?? [])
           .map(meta)
-          .filter((m) => m.Media.some((media) => (media.bitrate ?? 0) >= min));
+          .filter((m) => !min || m.Media.some((media) => (media.bitrate ?? 0) >= min));
         bitrateCache = { key, items: all };
       }
       return { items: bitrateCache.items.slice(from, from + count), total: bitrateCache.items.length };
@@ -550,6 +592,27 @@ const commands: Record<string, Command> = {
     const c = await container(`/library/sections/${section}/${field}`);
     return (c.Directory ?? []).map((d) => ({ key: d.key, title: d.title }));
   },
+
+  async section_count({ section, kind }): Promise<number> {
+    const c = await container(`/library/sections/${section}/all`, {
+      type: kind == null ? undefined : (kind as number),
+      "X-Plex-Container-Start": 0,
+      "X-Plex-Container-Size": 0,
+    });
+    return c.totalSize ?? c.size ?? 0;
+  },
+
+  async playlists(): Promise<Metadata[]> {
+    return ((await container("/playlists", { playlistType: "video" })).Metadata ?? []).map(meta);
+  },
+
+  async playlist({ ratingKey }): Promise<Metadata> {
+    const item = (await container(`/playlists/${ratingKey}`)).Metadata?.[0];
+    if (!item) throw new Error("That playlist no longer exists on the server");
+    return meta(item);
+  },
+
+  playlist_items: ({ ratingKey }) => playlistItems(ratingKey as string),
 
   async collections({ section }): Promise<Metadata[]> {
     return ((await container(`/library/sections/${section}/collections`)).Metadata ?? []).map(meta);
@@ -607,7 +670,7 @@ const commands: Record<string, Command> = {
     write(KEYS.prefs, prefs);
   },
 
-  playback_info: ({ ratingKey }) => playbackInfo(ratingKey as string),
+  playback_info: ({ ratingKey, playlist }) => playbackInfo(ratingKey as string, playlist as string | null),
 
   async transcode_url({ ratingKey, maxBitrateKbps, resolution, session }) {
     return transcodeUrl(ratingKey as string, {

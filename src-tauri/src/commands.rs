@@ -152,8 +152,9 @@ pub async fn home_hubs(state: State<'_, AppState>) -> CmdResult<Vec<Hub>> {
     state.plex.home_hubs(&server).await.map_err(err)
 }
 
-/// The last bitrate-filtered library. Plex can't filter on bitrate, so the
-/// whole library is fetched once and the grid pages through this copy.
+/// The last bitrate-filtered or shuffled library. Plex can't filter on
+/// bitrate and shuffles anew for every page, so the whole library is fetched
+/// once and the grid pages through this copy.
 #[derive(Default)]
 pub struct FilteredLibrary(Mutex<Option<(String, Arc<Vec<Metadata>>)>>);
 
@@ -169,7 +170,7 @@ pub async fn section_items(
 ) -> CmdResult<Page> {
     let server = current_server(&state).await?;
     let filters = filters.unwrap_or_default();
-    if filters.min_bitrate_kbps.is_none() {
+    if !filters.needs_whole_library(&sort) {
         return state
             .plex
             .section_filtered(&server, &section, Some((start, size)), &sort, &filters)
@@ -178,7 +179,9 @@ pub async fn section_items(
     }
 
     let key = format!("{}|{section}|{sort}|{}", server.machine_id, serde_json::to_string(&filters).map_err(err)?);
-    let cached = filtered.0.lock().unwrap().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone());
+    // Random order is shuffled again each time the grid starts from the top.
+    let reshuffle = sort.starts_with("random") && start == 0;
+    let cached = filtered.0.lock().unwrap().as_ref().filter(|(k, _)| *k == key && !reshuffle).map(|(_, v)| v.clone());
     let all = match cached {
         Some(all) => all,
         None => {
@@ -194,6 +197,37 @@ pub async fn section_items(
     };
     let items = all.iter().skip(start as usize).take(size as usize).cloned().collect();
     Ok(Page { items, total: all.len() as u32 })
+}
+
+/// How many movies or shows a library holds, or with `kind` how many items
+/// of that Plex type (4 for episodes).
+#[tauri::command]
+pub async fn section_count(state: State<'_, AppState>, section: String, kind: Option<u8>) -> CmdResult<u32> {
+    let server = current_server(&state).await?;
+    state.plex.section_total(&server, &section, kind).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn playlists(state: State<'_, AppState>) -> CmdResult<Vec<Metadata>> {
+    let server = current_server(&state).await?;
+    state.plex.playlists(&server).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn playlist(state: State<'_, AppState>, rating_key: String) -> CmdResult<Metadata> {
+    let server = current_server(&state).await?;
+    state
+        .plex
+        .playlist(&server, &rating_key)
+        .await
+        .map_err(err)?
+        .ok_or_else(|| "That playlist no longer exists on the server".to_owned())
+}
+
+#[tauri::command]
+pub async fn playlist_items(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
+    let server = current_server(&state).await?;
+    state.plex.playlist_items(&server, &rating_key).await.map_err(err)
 }
 
 /// Genres or decades a library can be filtered by.

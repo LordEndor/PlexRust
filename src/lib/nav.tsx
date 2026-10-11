@@ -12,7 +12,10 @@ export type Route =
   | { name: "discover"; query?: string }
   | { name: "request"; mediaType: MediaType; tmdbId: number }
   | { name: "requests" }
-  | { name: "player"; ratingKey: string; resume: boolean };
+  | { name: "playlists" }
+  | { name: "playlist"; ratingKey: string }
+  /** `playlist` plays on through that playlist rather than the show. */
+  | { name: "player"; ratingKey: string; resume: boolean; playlist?: string };
 
 export interface Nav {
   server: ServerConnection;
@@ -46,6 +49,10 @@ export function routeKey(r: Route) {
       return `request:${r.mediaType}:${r.tmdbId}`;
     case "requests":
       return "requests";
+    case "playlists":
+      return "playlists";
+    case "playlist":
+      return `playlist:${r.ratingKey}`;
     case "player":
       return `player:${r.ratingKey}`;
   }

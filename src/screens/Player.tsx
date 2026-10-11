@@ -139,9 +139,11 @@ interface Props {
   onClose: () => void;
   /** Plays another episode in place of this one. */
   onPlayNext: (ratingKey: string) => void;
+  /** Played from this playlist: next and previous follow it. */
+  playlist?: string;
 }
 
-export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
+export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Props) {
   const { server } = useNav();
   const prefs = usePrefs();
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
@@ -214,7 +216,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
 
     (async () => {
       try {
-        const pi = await playback.info(ratingKey);
+        const pi = await playback.info(ratingKey, playlist);
         if (disposed) return;
         setInfo(pi);
         choice.current = pi.rememberedTracks ?? null;
@@ -385,7 +387,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
         .setFullscreen(false)
         .catch(() => {});
     };
-  }, [ratingKey, resume, report]);
+  }, [ratingKey, resume, report, playlist]);
 
   // Keep Plex's Continue Watching in step while playing.
   useEffect(() => {
