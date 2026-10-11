@@ -57,6 +57,20 @@ pub struct Metadata {
     /// Intro and credits markers (needs `includeMarkers=1`).
     #[serde(rename = "Marker")]
     pub markers: Vec<Marker>,
+    /// Chapters from the file (needs `includeChapters=1`).
+    #[serde(rename = "Chapter")]
+    pub chapters: Vec<Chapter>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Chapter {
+    /// The chapter's title, when the file names it.
+    pub tag: Option<String>,
+    pub index: Option<u32>,
+    /// Milliseconds.
+    pub start_time_offset: u64,
+    pub end_time_offset: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -103,6 +117,8 @@ pub struct Part {
     pub file: Option<String>,
     pub size: Option<u64>,
     pub container: Option<String>,
+    /// `sd` when the server has generated seek-bar thumbnails for this file.
+    pub indexes: Option<String>,
     #[serde(rename = "Stream")]
     pub stream: Vec<Stream>,
 }
@@ -214,7 +230,7 @@ impl PlexClient {
     /// Full details for one item, including cast, genres and media info.
     pub async fn metadata(&self, server: &ServerConnection, rating_key: &str) -> Result<Option<Metadata>> {
         let c = self
-            .container(server, &format!("/library/metadata/{rating_key}"), &[("includeMarkers", "1")])
+            .container(server, &format!("/library/metadata/{rating_key}"), &[("includeMarkers", "1"), ("includeChapters", "1")])
             .await?;
         Ok(c.metadata.into_iter().next())
     }

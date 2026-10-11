@@ -1,10 +1,32 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
 export interface Marker {
   type: "intro" | "credits" | string;
   startTimeOffset: number;
   endTimeOffset: number;
   final?: boolean | null;
+}
+
+export interface Chapter {
+  tag?: string | null;
+  index?: number | null;
+  startTimeOffset: number;
+  endTimeOffset: number;
+}
+
+/** Audio and subtitle picks remembered per show (or per movie). */
+export interface TrackChoice {
+  audioLanguage?: string | null;
+  audioTitle?: string | null;
+  subtitlesOff: boolean;
+  subtitleLanguage?: string | null;
+  subtitleTitle?: string | null;
+  subtitleForced: boolean;
+}
+
+export interface PreviewInfo {
+  count: number;
+  intervalMs: number;
 }
 
 export interface PlaybackInfo {
@@ -20,6 +42,11 @@ export interface PlaybackInfo {
   logPath: string;
   stripDolbyVision: boolean;
   next?: { ratingKey: string; title: string; subtitle: string; thumb?: string | null } | null;
+  partId?: number | null;
+  hasPreviews: boolean;
+  chapters: Chapter[];
+  trackKey: string;
+  rememberedTracks?: TrackChoice | null;
 }
 
 export type PlaybackState = "playing" | "paused" | "stopped";
@@ -29,6 +56,8 @@ export const playback = {
   transcodeUrl: (ratingKey: string, maxBitrateKbps: number, resolution: string, session: string) =>
     invoke<string>("transcode_url", { ratingKey, maxBitrateKbps, resolution, offsetSecs: 0, session }),
   stopTranscode: (session: string) => invoke<void>("stop_transcode", { session }),
+  loadPreviews: (partId: number) => invoke<PreviewInfo | null>("load_previews", { partId }),
+  rememberTracks: (key: string, choice: TrackChoice) => invoke<void>("remember_tracks", { key, choice }),
   report: (ratingKey: string, playbackState: PlaybackState, timeMs: number, durationMs: number) =>
     invoke<void>("report_progress", {
       ratingKey,
@@ -37,6 +66,11 @@ export const playback = {
       durationMs: Math.round(durationMs),
     }),
 };
+
+/** URL of one seek-bar thumbnail, served from the index the player loaded. */
+export function previewUrl(partId: number, frame: number) {
+  return `${convertFileSrc("", "plximg")}?bif=${partId}&i=${frame}`;
+}
 
 export interface Quality {
   label: string;

@@ -10,6 +10,7 @@ use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, Manager, UriSchemeResponder};
 
 use crate::AppState;
+use crate::player::PreviewStore;
 
 const CACHE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -69,15 +70,25 @@ pub fn handle(app: &AppHandle, request: Request<Vec<u8>>, responder: UriSchemeRe
 
 async fn serve(app: &AppHandle, query: &str) -> Result<(Vec<u8>, String), String> {
     let mut path = None;
+    let (mut bif, mut frame) = (None, 0usize);
     let (mut w, mut h) = (300, 450);
     for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
         match &*k {
             "url" => path = Some(v.into_owned()),
+            "bif" => bif = v.parse::<u64>().ok(),
+            "i" => frame = v.parse().unwrap_or(0),
             "w" => w = v.parse().unwrap_or(w).clamp(16, 3840),
             "h" => h = v.parse().unwrap_or(h).clamp(16, 2160),
             _ => {}
         }
     }
+    // Seek-bar thumbnails are already in memory once the player loaded them.
+    if let Some(part_id) = bif {
+        let index = app.state::<PreviewStore>().get(part_id).ok_or("previews not loaded")?;
+        let jpeg = index.frame(frame).ok_or("no such frame")?;
+        return Ok((jpeg.to_vec(), "image/jpeg".into()));
+    }
+
     let path = path.ok_or("missing url")?;
     // The query also carries the server id, so switching servers never
     // serves another server's artwork.
