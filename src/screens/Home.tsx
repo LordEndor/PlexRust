@@ -7,6 +7,8 @@ import {
   Image,
   LogOut,
   Music,
+  PanelLeftClose,
+  PanelLeftOpen,
   Search,
   Server,
   Settings,
@@ -29,6 +31,15 @@ import { SettingsView } from "@/screens/SettingsView";
 
 const sectionIcon = { movie: Film, show: Tv, artist: Music, photo: Image } as const;
 const MAX_STACK = 15;
+const SIDEBAR_KEY = "plexrust.sidebarCollapsed";
+
+function readCollapsed() {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 function iconFor(type: string) {
   return sectionIcon[type as keyof typeof sectionIcon] ?? Clapperboard;
@@ -48,6 +59,18 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   // instant and keeps its scroll position.
   const [stack, setStack] = useState<Route[]>([{ name: "home" }]);
   const [query, setQuery] = useState("");
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+
+  function toggleSidebar() {
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(SIDEBAR_KEY, c ? "0" : "1");
+      } catch {
+        // Not remembered; it still toggles.
+      }
+      return !c;
+    });
+  }
 
   useEffect(() => {
     setSections(null);
@@ -109,9 +132,32 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   return (
     <NavContext.Provider value={nav}>
       <div className="flex h-full">
-        <aside className="bg-sidebar flex w-60 shrink-0 flex-col gap-1 border-r p-3">
-          <div className="flex items-center gap-2 px-2 py-3 text-lg font-semibold">PlexRust</div>
-          <NavItem icon={HomeIcon} label="Home" active={root.name === "home"} onClick={() => goRoot({ name: "home" })} />
+        <aside
+          className={cn(
+            "bg-sidebar flex shrink-0 flex-col gap-1 overflow-hidden border-r p-3 transition-[width] duration-200",
+            collapsed ? "w-[4.25rem]" : "w-60",
+          )}
+        >
+          <div className={cn("flex items-center gap-2 py-2", collapsed ? "justify-center" : "pl-2")}>
+            {!collapsed && <span className="flex-1 truncate text-lg font-semibold">PlexRust</span>}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground size-8"
+              onClick={toggleSidebar}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+            </Button>
+          </div>
+          <NavItem
+            icon={HomeIcon}
+            label="Home"
+            collapsed={collapsed}
+            active={root.name === "home"}
+            onClick={() => goRoot({ name: "home" })}
+          />
           {sections === null
             ? Array.from({ length: 2 }, (_, i) => <Skeleton key={i} className="h-9" />)
             : video?.map((s) => (
@@ -119,15 +165,25 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
                   key={s.key}
                   icon={iconFor(s.type)}
                   label={s.title}
+                  collapsed={collapsed}
                   active={root.name === "library" && root.section.key === s.key}
                   onClick={() => goRoot({ name: "library", section: s })}
                 />
               ))}
           <div className="flex-1" />
-          <NavItem icon={Settings} label="Settings" active={root.name === "settings"} onClick={() => goRoot({ name: "settings" })} />
-          <div className="mt-2 flex items-center gap-2 rounded-lg border p-2">
+          <NavItem
+            icon={Settings}
+            label="Settings"
+            collapsed={collapsed}
+            active={root.name === "settings"}
+            onClick={() => goRoot({ name: "settings" })}
+          />
+          <div
+            className={cn("mt-2 flex items-center gap-2 rounded-lg border p-2", collapsed && "flex-col border-0 p-0")}
+            title={collapsed ? user.title || user.username : undefined}
+          >
             <UserAvatar user={user} />
-            <div className="min-w-0 flex-1 truncate text-sm">{user.title || user.username}</div>
+            {!collapsed && <div className="min-w-0 flex-1 truncate text-sm">{user.title || user.username}</div>}
             <Button variant="ghost" size="icon" onClick={onSignOut} title="Sign out">
               <LogOut />
             </Button>
@@ -196,23 +252,28 @@ function NavItem({
   icon: Icon,
   label,
   active,
+  collapsed,
   onClick,
 }: {
   icon: typeof Film;
   label: string;
   active?: boolean;
+  collapsed?: boolean;
   onClick?: () => void;
 }) {
   return (
     <button
       onClick={onClick}
+      title={collapsed ? label : undefined}
+      aria-label={label}
       className={cn(
-        "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+        "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground flex items-center gap-3 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors",
         active && "bg-sidebar-accent text-foreground",
+        collapsed && "justify-center px-0",
       )}
     >
-      <Icon className="size-4" />
-      {label}
+      <Icon className="size-4 shrink-0" />
+      {!collapsed && <span className="truncate">{label}</span>}
     </button>
   );
 }

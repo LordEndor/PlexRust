@@ -75,6 +75,26 @@ export interface Media {
   audioCodec?: string | null;
   audioChannels?: number | null;
   container?: string | null;
+  Part?: MediaPart[];
+}
+
+/** One file of a media version. */
+export interface MediaPart {
+  file?: string | null;
+  size?: number | null;
+  container?: string | null;
+  Stream?: MediaStream[];
+}
+
+export interface MediaStream {
+  /** 1 video, 2 audio, 3 subtitle. */
+  streamType?: number | null;
+  codec?: string | null;
+  displayTitle?: string | null;
+  extendedDisplayTitle?: string | null;
+  /** Kbps. */
+  bitrate?: number | null;
+  forced?: boolean | null;
 }
 
 export type ItemType = "movie" | "show" | "season" | "episode" | string;
@@ -108,6 +128,8 @@ export interface Metadata {
   audienceRating?: number | null;
   studio?: string | null;
   originallyAvailableAt?: string | null;
+  /** Unix seconds. */
+  addedAt?: number | null;
   Genre: Tag[];
   Director: Tag[];
   Role: Tag[];

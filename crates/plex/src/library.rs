@@ -137,7 +137,11 @@ pub struct Stream {
     pub language: Option<String>,
     pub language_code: Option<String>,
     pub display_title: Option<String>,
+    /// Longer description, such as "English (EAC3 5.1)" with the track's title.
+    pub extended_display_title: Option<String>,
     pub title: Option<String>,
+    /// Kbps.
+    pub bitrate: Option<u32>,
     /// Set for subtitles stored next to the video rather than inside it.
     pub key: Option<String>,
     pub forced: Option<bool>,
