@@ -58,3 +58,93 @@ export const api = {
 export function errorMessage(e: unknown): string {
   return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
 }
+
+export interface Tag {
+  tag: string;
+  role?: string | null;
+  thumb?: string | null;
+}
+
+export interface Media {
+  videoResolution?: string | null;
+  videoCodec?: string | null;
+  audioCodec?: string | null;
+  audioChannels?: number | null;
+  container?: string | null;
+}
+
+export type ItemType = "movie" | "show" | "season" | "episode" | string;
+
+export interface Metadata {
+  ratingKey: string;
+  type: ItemType;
+  title: string;
+  parentRatingKey?: string | null;
+  grandparentRatingKey?: string | null;
+  parentTitle?: string | null;
+  grandparentTitle?: string | null;
+  summary?: string | null;
+  tagline?: string | null;
+  year?: number | null;
+  thumb?: string | null;
+  art?: string | null;
+  parentThumb?: string | null;
+  grandparentThumb?: string | null;
+  grandparentArt?: string | null;
+  duration?: number | null;
+  viewOffset?: number | null;
+  viewCount?: number | null;
+  index?: number | null;
+  parentIndex?: number | null;
+  leafCount?: number | null;
+  viewedLeafCount?: number | null;
+  childCount?: number | null;
+  contentRating?: string | null;
+  rating?: number | null;
+  audienceRating?: number | null;
+  studio?: string | null;
+  originallyAvailableAt?: string | null;
+  Genre: Tag[];
+  Director: Tag[];
+  Role: Tag[];
+  Media: Media[];
+}
+
+export interface Hub {
+  hubIdentifier: string;
+  title: string;
+  type: string;
+  Metadata: Metadata[];
+}
+
+export interface Page {
+  items: Metadata[];
+  total: number;
+}
+
+export const library = {
+  homeHubs: () => invoke<Hub[]>("home_hubs"),
+  sectionItems: (section: string, start: number, size: number, sort = "titleSort") =>
+    invoke<Page>("section_items", { section, start, size, sort }),
+  metadata: (ratingKey: string) => invoke<Metadata>("metadata", { ratingKey }),
+  children: (ratingKey: string) => invoke<Metadata[]>("children", { ratingKey }),
+  search: (query: string) => invoke<Hub[]>("search", { query }),
+};
+
+/**
+ * URL for a Plex image resized on the server, so the UI never downloads
+ * full-size artwork for a 200px poster.
+ */
+export function imageUrl(server: ServerConnection, path: string | null | undefined, width: number, height: number) {
+  if (!path) return undefined;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const params = new URLSearchParams({
+    width: String(Math.round(width * dpr)),
+    height: String(Math.round(height * dpr)),
+    minSize: "1",
+    upscale: "1",
+    url: path,
+    "X-Plex-Token": server.token,
+  });
+  return `${server.uri}/photo/:/transcode?${params}`;
+}
