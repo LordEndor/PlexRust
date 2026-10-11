@@ -38,6 +38,7 @@ pub fn run() {
                 device_name: hostname(),
             })?;
             app.manage(images::ImageCache::default());
+            app.manage(player::PreviewStore::default());
             app.manage(AppState {
                 plex,
                 settings: Mutex::new(settings),
@@ -64,6 +65,8 @@ pub fn run() {
             player::transcode_url,
             player::stop_transcode,
             player::report_progress,
+            player::load_previews,
+            player::remember_tracks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

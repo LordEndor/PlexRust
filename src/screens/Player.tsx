@@ -16,6 +16,7 @@ import {
   ChevronsRight,
   Captions,
   Gauge,
+  ListVideo,
   Loader2,
   Maximize,
   Minimize,
@@ -39,10 +40,29 @@ import {
 import { errorMessage, imageUrl } from "@/lib/api";
 import { useNav } from "@/lib/nav";
 import { loadPrefs, usePrefs } from "@/lib/prefs";
-import { formatTime, playback, QUALITIES, type PlaybackInfo, type PlaybackState, type Quality } from "@/lib/player";
+import {
+  formatTime,
+  playback,
+  previewUrl,
+  QUALITIES,
+  type PlaybackInfo,
+  type PlaybackState,
+  type Quality,
+  type TrackChoice,
+} from "@/lib/player";
 import { cn } from "@/lib/utils";
 
-const OBSERVED = ["pause", "time-pos", "duration", "track-list", "paused-for-cache", "volume", "mute", "eof-reached"] as const;
+const OBSERVED = [
+  "pause",
+  "time-pos",
+  "duration",
+  "track-list",
+  "chapter-list",
+  "paused-for-cache",
+  "volume",
+  "mute",
+  "eof-reached",
+] as const;
 
 const MPV_ARGS = [
   "--vo=gpu-next",
@@ -76,6 +96,7 @@ interface Track {
   codec?: string;
   selected?: boolean;
   external?: boolean;
+  forced?: boolean;
   "demux-channel-count"?: number;
 }
 
@@ -83,6 +104,28 @@ function trackLabel(t: Track) {
   const parts = [t.title, t.lang?.toUpperCase(), t.codec?.toUpperCase()].filter(Boolean);
   if (t.type === "audio" && t["demux-channel-count"]) parts.push(`${t["demux-channel-count"]}ch`);
   return parts.join(" · ") || `Track ${t.id}`;
+}
+
+interface Chapter {
+  title: string;
+  /** Seconds. */
+  start: number;
+}
+
+/** Seek-bar thumbnails for the file being played. */
+interface Previews {
+  partId: number;
+  count: number;
+  intervalMs: number;
+}
+
+/** The track matching a remembered pick: same language, ideally the same title. */
+function findTrack(tracks: Track[], type: Track["type"], lang?: string | null, title?: string | null, forced?: boolean) {
+  if (!lang && !title) return undefined;
+  const candidates = tracks.filter(
+    (t) => t.type === type && (t.lang ?? null) === (lang ?? null) && (forced === undefined || !!t.forced === forced),
+  );
+  return candidates.find((t) => (t.title ?? null) === (title ?? null)) ?? (lang ? candidates[0] : undefined);
 }
 
 interface Props {
@@ -113,6 +156,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
   const [skip, setSkip] = useState<{ label: string; to: number } | null>(null);
   // Shown once the ending credits start; countdown is null when waiting for a click.
   const [upNext, setUpNext] = useState<{ countdown: number | null } | null>(null);
+  const [previews, setPreviews] = useState<Previews | null>(null);
+  // Chapters mpv found in the file, used when Plex has none.
+  const [fileChapters, setFileChapters] = useState<Chapter[]>([]);
 
   // Latest values for timers and cleanup, which outlive any one render.
   const live = useRef({ time: 0, duration: 0, paused: false, info: null as PlaybackInfo | null });
@@ -126,6 +172,10 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
   // Markers already auto-skipped or dismissed, by index.
   const handledMarkers = useRef(new Set<number>());
   const finished = useRef(false);
+  // The audio and subtitle pick to restore, and whether it has been applied to
+  // the file loaded now. Reset per load since track ids change on reload.
+  const choice = useRef<TrackChoice | null>(null);
+  const applied = useRef({ audio: false, sub: false });
   const flash = useCallback((text: string, ms = 3000) => {
     setNotice(text);
     window.setTimeout(() => setNotice((n) => (n === text ? null : n)), ms);
@@ -162,6 +212,14 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
         const pi = await playback.info(ratingKey);
         if (disposed) return;
         setInfo(pi);
+        choice.current = pi.rememberedTracks ?? null;
+        if (pi.hasPreviews && pi.partId) {
+          const partId = pi.partId;
+          playback
+            .loadPreviews(partId)
+            .then((p) => !disposed && p && p.count > 0 && setPreviews({ partId, ...p }))
+            .catch(() => {});
+        }
         const prefs = await loadPrefs();
         if (disposed) return;
         const args = [...MPV_ARGS];
@@ -169,6 +227,33 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
         if (prefs.audioLanguage) args.push(`--alang=${prefs.audioLanguage}`);
         if (prefs.subtitleLanguage === "off") args.push("--sid=no");
         else if (prefs.subtitleLanguage) args.push(`--slang=${prefs.subtitleLanguage}`);
+        // Put back the audio and subtitles last picked for this show. External
+        // subtitles are added after the file opens, so a subtitle pick keeps
+        // being looked for as tracks appear.
+        const restoreTracks = (list: Track[]) => {
+          const c = choice.current;
+          // The list is empty until the file has opened.
+          if (!c || list.length === 0) return;
+          if (!applied.current.audio) {
+            const t = findTrack(list, "audio", c.audioLanguage, c.audioTitle);
+            if (t) {
+              applied.current.audio = true;
+              if (!t.selected) setProperty<number>("aid", t.id).catch(() => {});
+            }
+          }
+          if (!applied.current.sub) {
+            if (c.subtitlesOff) {
+              applied.current.sub = true;
+              if (list.some((t) => t.type === "sub" && t.selected)) setProperty<string>("sid", "no").catch(() => {});
+            } else {
+              const t = findTrack(list, "sub", c.subtitleLanguage, c.subtitleTitle, c.subtitleForced);
+              if (t) {
+                applied.current.sub = true;
+                if (!t.selected) setProperty<number>("sid", t.id).catch(() => {});
+              }
+            }
+          }
+        };
         const config: MpvConfig = { path: pi.mpvPath, args, observedProperties: OBSERVED, ipcTimeoutMs: 5000 };
         await init(config);
         if (disposed) return destroy();
@@ -187,6 +272,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
                 break;
               case "track-list":
                 setTracks((data as Track[]) ?? []);
+                restoreTracks((data as Track[]) ?? []);
+                break;
+              case "chapter-list":
+                setFileChapters(
+                  ((data as { title?: string; time: number }[]) ?? []).map((c, i) => ({
+                    title: c.title || `Chapter ${i + 1}`,
+                    start: c.time,
+                  })),
+                );
                 break;
               case "paused-for-cache":
                 setBuffering(!!data);
@@ -239,6 +333,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
 
         unlisten.push(
           await listenEvents((ev) => {
+            if (ev.event === "start-file") applied.current = { audio: false, sub: false };
             if (ev.event === "end-file" && ev.reason === "error") {
               const detail = (ev as { file_error?: unknown }).file_error;
               fail(typeof detail === "string" ? detail : "unknown error");
@@ -387,6 +482,8 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
   useEffect(() => {
     const onKey = async (e: KeyboardEvent) => {
       poke();
+      // Keys inside an open menu navigate or close the menu, not the player.
+      if (document.querySelector('[role="menu"]')) return;
       switch (e.key) {
         case " ":
         case "k":
@@ -429,6 +526,34 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
   const audio = tracks.filter((t) => t.type === "audio");
   const subs = tracks.filter((t) => t.type === "sub");
   const total = duration || (info?.durationMs ?? 0) / 1000;
+  const chapters: Chapter[] = info?.chapters.length
+    ? info.chapters.map((c, i) => ({ title: c.tag || `Chapter ${(c.index ?? i) + 1}`, start: c.startTimeOffset / 1000 }))
+    : fileChapters;
+
+  // A pick from the menus becomes the remembered one for this show.
+  const pickTrack = (type: "audio" | "sub", id: number | undefined) => {
+    applied.current[type] = true;
+    if (info) {
+      const t = tracks.find((t) => t.id === id && t.type === type);
+      const current = tracks.filter((t) => t.selected);
+      const sel = (kind: Track["type"]) => (kind === type ? t : current.find((c) => c.type === kind));
+      const a = sel("audio");
+      const sub = sel("sub");
+      const next: TrackChoice = {
+        audioLanguage: a?.lang ?? null,
+        audioTitle: a?.title ?? null,
+        subtitlesOff: !sub,
+        subtitleLanguage: sub?.lang ?? null,
+        subtitleTitle: sub?.title ?? null,
+        subtitleForced: !!sub?.forced,
+      };
+      choice.current = next;
+      playback.rememberTracks(info.trackKey, next).catch(() => {});
+    }
+    return type === "audio"
+      ? setProperty<number | string>("aid", id ?? "auto")
+      : setProperty<number | string>("sid", id ?? "no");
+  };
 
   return createPortal(
     <div
@@ -539,7 +664,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
         </div>
 
         <div className="pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col gap-3 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pt-20 pb-5">
-          <SeekBar time={time} duration={total} onSeek={seekTo} />
+          <SeekBar time={time} duration={total} onSeek={seekTo} chapters={chapters} previews={previews} />
           <div className="flex items-center gap-1 text-white">
             <IconButton title="Back 10s (←)" onClick={() => seekBy(-10)}>
               <RotateCcw />
@@ -572,14 +697,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext }: Props) {
               title="Volume (↑/↓)"
             />
 
-            <TrackMenu icon={<AudioLines />} title="Audio" tracks={audio} onPick={(id) => setProperty<number | string>("aid", id ?? "auto")} />
-            <TrackMenu
-              icon={<Captions />}
-              title="Subtitles"
-              tracks={subs}
-              allowOff
-              onPick={(id) => setProperty<number | string>("sid", id ?? "no")}
-            />
+            {chapters.length > 1 && <ChapterMenu chapters={chapters} time={time} previews={previews} onSeek={seekTo} />}
+            <TrackMenu icon={<AudioLines />} title="Audio" tracks={audio} onPick={(id) => pickTrack("audio", id)} />
+            <TrackMenu icon={<Captions />} title="Subtitles" tracks={subs} allowOff onPick={(id) => pickTrack("sub", id)} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" title="Quality" className="text-white hover:bg-white/10">
@@ -677,7 +797,67 @@ function TrackMenu({
   );
 }
 
-function SeekBar({ time, duration, onSeek }: { time: number; duration: number; onSeek: (secs: number) => void }) {
+/** Index of the chapter playing at `secs`, or -1 before the first. */
+function chapterAt(chapters: Chapter[], secs: number) {
+  let i = -1;
+  chapters.forEach((c, j) => {
+    if (c.start <= secs + 0.5) i = j;
+  });
+  return i;
+}
+
+function previewFrame(previews: Previews, secs: number) {
+  return previewUrl(previews.partId, Math.min(previews.count - 1, Math.floor((secs * 1000) / previews.intervalMs)));
+}
+
+function ChapterMenu({
+  chapters,
+  time,
+  previews,
+  onSeek,
+}: {
+  chapters: Chapter[];
+  time: number;
+  previews: Previews | null;
+  onSeek: (secs: number) => void;
+}) {
+  const current = chapterAt(chapters, time);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" title="Chapters" className="text-white hover:bg-white/10">
+          <ListVideo />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top" className="max-h-[60vh] w-80 overflow-y-auto">
+        <DropdownMenuLabel>Chapters</DropdownMenuLabel>
+        {chapters.map((c, i) => (
+          <DropdownMenuCheckItem key={i} checked={i === current} onSelect={() => onSeek(c.start)} className="gap-3">
+            {previews && (
+              <img src={previewFrame(previews, c.start)} alt="" className="aspect-video w-20 shrink-0 rounded object-cover" />
+            )}
+            <span className="min-w-0 flex-1 truncate">{c.title}</span>
+            <span className="text-muted-foreground text-xs tabular-nums">{formatTime(c.start)}</span>
+          </DropdownMenuCheckItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SeekBar({
+  time,
+  duration,
+  onSeek,
+  chapters,
+  previews,
+}: {
+  time: number;
+  duration: number;
+  onSeek: (secs: number) => void;
+  chapters: Chapter[];
+  previews: Previews | null;
+}) {
   const bar = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
@@ -689,6 +869,12 @@ function SeekBar({ time, duration, onSeek }: { time: number; duration: number; o
 
   const shown = drag ?? time;
   const pct = duration ? (shown / duration) * 100 : 0;
+  const ticks = duration ? chapters.filter((c) => c.start > 1 && c.start < duration - 1) : [];
+  // While dragging the preview follows the drag, otherwise the pointer.
+  const peek = drag ?? hover;
+  const peekChapter = peek !== null && chapters.length > 1 ? chapters[chapterAt(chapters, peek)] : undefined;
+  // Keep the bubble inside the window at either end of the bar.
+  const edge = previews ? "6rem" : "2rem";
 
   return (
     <div
@@ -708,19 +894,36 @@ function SeekBar({ time, duration, onSeek }: { time: number; duration: number; o
         setDrag(null);
       }}
     >
-      <div className="relative h-1 w-full rounded-full bg-white/25 transition-[height] group-hover:h-1.5">
-        <div className="bg-primary absolute inset-y-0 left-0 rounded-full" style={{ width: `${pct}%` }} />
+      <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/25 transition-[height] group-hover:h-1.5">
+        <div className="bg-primary absolute inset-y-0 left-0" style={{ width: `${pct}%` }} />
+        {ticks.map((c) => (
+          <div
+            key={c.start}
+            className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-black/70"
+            style={{ left: `${(c.start / duration) * 100}%` }}
+          />
+        ))}
       </div>
       <div
         className="bg-primary absolute size-3.5 -translate-x-1/2 rounded-full opacity-0 shadow transition-opacity group-hover:opacity-100"
         style={{ left: `${pct}%` }}
       />
-      {hover !== null && duration > 0 && (
+      {peek !== null && duration > 0 && (
         <div
-          className="pointer-events-none absolute bottom-6 -translate-x-1/2 rounded-md bg-black/80 px-2 py-1 text-xs text-white tabular-nums"
-          style={{ left: `${(hover / duration) * 100}%` }}
+          className="pointer-events-none absolute bottom-6 flex -translate-x-1/2 flex-col items-center gap-1.5"
+          style={{ left: `clamp(${edge}, ${(peek / duration) * 100}%, calc(100% - ${edge}))` }}
         >
-          {formatTime(hover)}
+          {previews && (
+            <img
+              src={previewFrame(previews, peek)}
+              alt=""
+              className="aspect-video w-48 rounded-lg border border-white/20 bg-black object-cover shadow-xl"
+            />
+          )}
+          <div className="max-w-48 rounded-md bg-black/80 px-2 py-1 text-center text-xs text-white">
+            {peekChapter && <div className="truncate text-white/70">{peekChapter.title}</div>}
+            <div className="tabular-nums">{formatTime(peek)}</div>
+          </div>
         </div>
       )}
     </div>
