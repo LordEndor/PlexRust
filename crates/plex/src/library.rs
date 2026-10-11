@@ -352,6 +352,16 @@ impl PlexClient {
         Ok(neighbours(all, episode))
     }
 
+    /// The episode a Play button on a show or season page should start.
+    pub async fn up_next(&self, server: &ServerConnection, item: &Metadata) -> Result<Option<Metadata>> {
+        let path = match item.kind.as_str() {
+            "show" => format!("/library/metadata/{}/allLeaves", item.rating_key),
+            "season" => format!("/library/metadata/{}/children", item.rating_key),
+            _ => return Ok(None),
+        };
+        Ok(up_next(self.container(server, &path, &[]).await?.metadata))
+    }
+
     pub async fn search(&self, server: &ServerConnection, query: &str) -> Result<Vec<Hub>> {
         let c = self
             .container(server, "/hubs/search", &[("query", query), ("limit", "12")])
@@ -361,6 +371,23 @@ impl PlexClient {
 }
 
 /// The item with the lowest `index` above `after`.
+/// The episode to play next in a show or season, Plex's "on deck": one
+/// that is part way through, else the one after the last watched, else the
+/// first. `None` once everything has been watched.
+fn up_next(mut episodes: Vec<Metadata>) -> Option<Metadata> {
+    let specials = episodes.iter().all(|m| m.parent_index == Some(0));
+    episodes.retain(|m| specials || m.parent_index != Some(0));
+    episodes.sort_by_key(|m| (m.parent_index, m.index));
+    let watched = |m: &Metadata| m.view_count.unwrap_or_default() > 0;
+    let started = |m: &Metadata| m.view_offset.unwrap_or_default() > 0;
+    let last = episodes.iter().rposition(|m| watched(m) || started(m));
+    match last {
+        Some(i) if started(&episodes[i]) => episodes.into_iter().nth(i),
+        Some(i) => episodes.into_iter().skip(i + 1).find(|m| !watched(m)),
+        None => episodes.into_iter().next(),
+    }
+}
+
 fn neighbours(mut all: Vec<Metadata>, episode: &Metadata) -> (Option<Metadata>, Vec<Metadata>) {
     let specials = episode.parent_index == Some(0);
     all.retain(|m| (m.parent_index == Some(0)) == specials);
@@ -411,6 +438,28 @@ mod tests {
     fn filters_become_query_params() {
         let f = Filters { genre: Some("12".into()), unwatched: true, min_bitrate_kbps: Some(1), ..Default::default() };
         assert_eq!(f.query(), [("genre", "12".to_owned()), ("unwatched", "1".to_owned())]);
+    }
+
+    #[test]
+    fn up_next_follows_the_last_watched_episode() {
+        let ep = |key: &str, season, index, views, offset| Metadata {
+            rating_key: key.into(),
+            parent_index: Some(season),
+            index: Some(index),
+            view_count: Some(views),
+            view_offset: Some(offset),
+            ..Default::default()
+        };
+        let next = |eps: Vec<Metadata>| up_next(eps).map(|m| m.rating_key);
+
+        // Nothing watched: the first episode, specials skipped.
+        assert_eq!(next(vec![ep("b", 1, 2, 0, 0), ep("x", 0, 1, 0, 0), ep("a", 1, 1, 0, 0)]).as_deref(), Some("a"));
+        // Part way through one: that one.
+        assert_eq!(next(vec![ep("a", 1, 1, 1, 0), ep("b", 1, 2, 0, 500), ep("c", 1, 3, 0, 0)]).as_deref(), Some("b"));
+        // After the last watched, across seasons.
+        assert_eq!(next(vec![ep("a", 1, 1, 1, 0), ep("b", 1, 2, 1, 0), ep("c", 2, 1, 0, 0)]).as_deref(), Some("c"));
+        // Everything watched.
+        assert_eq!(next(vec![ep("a", 1, 1, 1, 0)]), None);
     }
 
     #[test]

@@ -305,6 +305,26 @@ function episode(m: Metadata): Episode {
   };
 }
 
+/**
+ * The episode to play next in a show or season: one part way through, else
+ * the one after the last watched, else the first. Same rule as the Rust side.
+ */
+function upNext(episodes: Metadata[]): Metadata | undefined {
+  const specials = episodes.every((m) => m.parentIndex === 0);
+  const list = episodes
+    .filter((m) => specials || m.parentIndex !== 0)
+    .sort((a, b) => (a.parentIndex ?? 0) - (b.parentIndex ?? 0) || (a.index ?? 0) - (b.index ?? 0));
+  const watched = (m: Metadata) => (m.viewCount ?? 0) > 0;
+  const started = (m: Metadata) => (m.viewOffset ?? 0) > 0;
+  let last = -1;
+  list.forEach((m, i) => {
+    if (watched(m) || started(m)) last = i;
+  });
+  if (last < 0) return list[0];
+  if (started(list[last])) return list[last];
+  return list.slice(last + 1).find((m) => !watched(m));
+}
+
 function episodeLabel(m: Metadata) {
   return `${m.grandparentTitle ?? ""} · S${m.parentIndex ?? 0} · E${m.index ?? 0}`;
 }
@@ -537,6 +557,31 @@ const commands: Record<string, Command> = {
 
   async collection_items({ ratingKey }): Promise<Metadata[]> {
     return ((await container(`/library/collections/${ratingKey}/children`)).Metadata ?? []).map(meta);
+  },
+
+  async set_watched({ ratingKey, watched }) {
+    const server = currentServer();
+    const action = watched ? "/:/scrobble" : "/:/unscrobble";
+    await request(
+      buildUrl(server.uri, action, { key: ratingKey as string, identifier: "com.plexapp.plugins.library" }, server.token),
+      { json: false },
+    );
+  },
+
+  async remove_from_continue_watching({ ratingKey }) {
+    const server = currentServer();
+    await request(
+      buildUrl(server.uri, "/actions/removeFromContinueWatching", { ratingKey: ratingKey as string }, server.token),
+      { method: "PUT", json: false },
+    );
+  },
+
+  async up_next({ ratingKey }): Promise<Metadata | null> {
+    const item = meta(await metadataRaw(ratingKey as string));
+    const path =
+      item.type === "show" ? `/library/metadata/${item.ratingKey}/allLeaves` : `/library/metadata/${item.ratingKey}/children`;
+    if (item.type !== "show" && item.type !== "season") return null;
+    return upNext(((await container(path)).Metadata ?? []).map(meta)) ?? null;
   },
 
   async trailers({ ratingKey }): Promise<Metadata[]> {

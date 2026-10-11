@@ -101,12 +101,31 @@ impl PlexClient {
         Ok(())
     }
 
-    /// Marks an item as watched.
+    /// Marks an item as watched. For a show or season, every episode in it.
     pub async fn scrobble(&self, server: &ServerConnection, rating_key: &str) -> Result<()> {
+        self.set_watched(server, rating_key, true).await
+    }
+
+    /// Marks an item (or every episode of a show or season) watched or unwatched.
+    pub async fn set_watched(&self, server: &ServerConnection, rating_key: &str, watched: bool) -> Result<()> {
+        let action = if watched { "scrobble" } else { "unscrobble" };
         let resp = self
             .http
-            .get(format!("{}/:/scrobble", server.uri))
+            .get(format!("{}/:/{action}", server.uri))
             .query(&[("key", rating_key), ("identifier", "com.plexapp.plugins.library")])
+            .header("X-Plex-Token", &server.token)
+            .send()
+            .await?;
+        check(resp).await?;
+        Ok(())
+    }
+
+    /// Takes an item off Continue Watching without changing its progress.
+    pub async fn remove_from_continue_watching(&self, server: &ServerConnection, rating_key: &str) -> Result<()> {
+        let resp = self
+            .http
+            .put(format!("{}/actions/removeFromContinueWatching", server.uri))
+            .query(&[("ratingKey", rating_key)])
             .header("X-Plex-Token", &server.token)
             .send()
             .await?;

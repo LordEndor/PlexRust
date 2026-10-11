@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLibraryChanged } from "@/lib/changes";
 import { errorMessage, library, type FilterValue, type Filters, type LibrarySection, type Metadata } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -150,6 +151,14 @@ function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React
     },
     [section.key, sort, filters],
   );
+
+  // Watched state changed somewhere: reload what's on screen, keeping the
+  // scroll position. An unwatched filter can drop items, so counts refresh too.
+  useLibraryChanged(() => {
+    const pages = [...requested.current];
+    requested.current = new Set();
+    pages.forEach((p) => loadPage(p));
+  });
 
   useEffect(() => {
     library.filterValues(section.key, "genre").then(setGenres, () => setGenres([]));

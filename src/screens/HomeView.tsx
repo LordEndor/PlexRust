@@ -1,24 +1,31 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { FeaturedBanner, featuredItems } from "@/components/FeaturedBanner";
 import { HubRow } from "@/components/HubRow";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, library, type Hub } from "@/lib/api";
+import { useLibraryChanged } from "@/lib/changes";
 
 export function HomeView() {
   const [hubs, setHubs] = useState<Hub[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const featured = useMemo(() => (hubs ? featuredItems(hubs) : []), [hubs]);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     library
       .homeHubs()
-      .then(setHubs)
+      .then((h) => {
+        setHubs(h);
+        setError(null);
+      })
       .catch((e) => {
         setError(errorMessage(e));
-        setHubs([]);
+        setHubs((prev) => prev ?? []);
       });
   }, []);
+
+  useEffect(load, [load]);
+  useLibraryChanged(load);
 
   return (
     <div className="flex h-full flex-col gap-10 overflow-y-auto p-8">
@@ -36,7 +43,9 @@ export function HomeView() {
           </div>
         ))}
       {hubs?.length === 0 && !error && <p className="text-muted-foreground text-sm">Nothing here yet.</p>}
-      {hubs?.map((h) => <HubRow key={h.hubIdentifier} hub={h} />)}
+      {hubs?.map((h) => (
+        <HubRow key={h.hubIdentifier} hub={h} />
+      ))}
     </div>
   );
 }

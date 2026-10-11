@@ -1,13 +1,22 @@
 import { useEffect, useState } from "react";
-import { Check, Clapperboard, Play, RotateCcw, Star } from "lucide-react";
+import { Check, Clapperboard, Ellipsis, Play, RotateCcw, Star } from "lucide-react";
 
+import { ItemContextMenu, itemActions } from "@/components/ItemMenu";
 import { Poster, ProgressBar } from "@/components/Poster";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckItem,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage, imageUrl, library, type Metadata } from "@/lib/api";
-import { formatDuration, isWatched, progress, resolutionLabel } from "@/lib/format";
+import { useLibraryChanged } from "@/lib/changes";
+import { episodeLabel, formatDuration, isWatched, progress, resolutionLabel } from "@/lib/format";
 import { useNav } from "@/lib/nav";
 import { formatTime } from "@/lib/player";
 
@@ -15,7 +24,11 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
   const [item, setItem] = useState<Metadata | null>(null);
   const [children, setChildren] = useState<Metadata[] | null>(null);
   const [trailer, setTrailer] = useState<Metadata | null>(null);
+  const [upNext, setUpNext] = useState<Metadata | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped when watched state changes elsewhere, to load the page again.
+  const [version, setVersion] = useState(0);
+  useLibraryChanged(() => setVersion((v) => v + 1));
 
   useEffect(() => {
     let live = true;
@@ -24,7 +37,13 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
         const m = await library.metadata(ratingKey);
         if (!live) return;
         setItem(m);
-        if (m.type === "movie" || m.type === "show") {
+        if (m.type === "show" || m.type === "season") {
+          library
+            .upNext(ratingKey)
+            .then((e) => live && setUpNext(e))
+            .catch(() => live && setUpNext(null));
+        }
+        if (version === 0 && (m.type === "movie" || m.type === "show")) {
           // Trailers are a bonus: no button if they can't be listed.
           library
             .trailers(ratingKey)
@@ -32,7 +51,9 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
             .catch(() => {});
         }
         if (m.type === "show" || m.type === "season" || m.type === "collection") {
-          const kids = await (m.type === "collection" ? library.collectionItems(ratingKey) : library.children(ratingKey));
+          const kids = await (m.type === "collection"
+            ? library.collectionItems(ratingKey)
+            : library.children(ratingKey));
           if (live) setChildren(kids);
         }
       } catch (e) {
@@ -42,14 +63,14 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
     return () => {
       live = false;
     };
-  }, [ratingKey]);
+  }, [ratingKey, version]);
 
   if (error) return <p className="text-destructive p-8 text-sm">{error}</p>;
   if (!item) return <HeroSkeleton />;
 
   return (
     <div className="h-full overflow-y-auto">
-      <Hero item={item} trailer={trailer} />
+      <Hero item={item} trailer={trailer} upNext={upNext} />
       <div className="relative flex flex-col gap-10 px-8 pb-12">
         {item.type === "show" && <Seasons seasons={children} />}
         {item.type === "season" && <Episodes episodes={children} />}
@@ -60,8 +81,13 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
   );
 }
 
-function Hero({ item, trailer }: { item: Metadata; trailer: Metadata | null }) {
-  const { server, navigate } = useNav();
+function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | null; upNext: Metadata | null }) {
+  const nav = useNav();
+  const { server, navigate } = nav;
+  const actions = itemActions(item, nav).filter((a) => a.label !== "Play" && a.label !== "Resume");
+  // What the Play button starts: the item itself, or a show's next episode.
+  const target = item.type === "movie" || item.type === "episode" ? item : upNext;
+  const targetResumable = !!target && progress(target) > 0;
   const art = item.art ?? item.grandparentArt;
   const poster = item.type === "episode" ? item.thumb : (item.thumb ?? item.parentThumb);
   const wide = item.type === "episode";
@@ -90,7 +116,9 @@ function Hero({ item, trailer }: { item: Metadata; trailer: Metadata | null }) {
       )}
       <div className="relative flex gap-8 px-8 pt-16 pb-10">
         <div className={wide ? "w-96 shrink-0" : "w-56 shrink-0"}>
-          <div className={`bg-card overflow-hidden rounded-2xl border shadow-2xl ${wide ? "aspect-video" : "aspect-[2/3]"}`}>
+          <div
+            className={`bg-card overflow-hidden rounded-2xl border shadow-2xl ${wide ? "aspect-video" : "aspect-[2/3]"}`}
+          >
             {poster && (
               <img
                 src={imageUrl(server, poster, wide ? 384 : 224, wide ? 216 : 336)}
@@ -104,7 +132,9 @@ function Hero({ item, trailer }: { item: Metadata; trailer: Metadata | null }) {
           {item.type === "episode" && item.grandparentTitle && (
             <button
               className="text-muted-foreground hover:text-foreground w-fit text-sm font-medium"
-              onClick={() => item.grandparentRatingKey && navigate({ name: "item", ratingKey: item.grandparentRatingKey })}
+              onClick={() =>
+                item.grandparentRatingKey && navigate({ name: "item", ratingKey: item.grandparentRatingKey })
+              }
             >
               {item.grandparentTitle}
             </button>
@@ -136,34 +166,84 @@ function Hero({ item, trailer }: { item: Metadata; trailer: Metadata | null }) {
             </div>
           )}
           {item.tagline && <p className="text-lg italic">{item.tagline}</p>}
-          {item.summary && <p className="text-muted-foreground line-clamp-4 max-w-3xl text-sm leading-relaxed">{item.summary}</p>}
-          {(item.type === "movie" || item.type === "episode" || trailer) && (
-            <div className="flex items-center gap-3">
-              {(item.type === "movie" || item.type === "episode") && (
-                <Button size="lg" onClick={() => navigate({ name: "player", ratingKey: item.ratingKey, resume: resumable })}>
-                  <Play className="fill-current" />{" "}
-                  {resumable ? `Resume from ${formatTime((item.viewOffset ?? 0) / 1000)}` : "Play"}
-                </Button>
-              )}
-              {resumable && (
-                <Button
-                  size="lg"
-                  variant="secondary"
-                  onClick={() => navigate({ name: "player", ratingKey: item.ratingKey, resume: false })}
-                >
-                  <RotateCcw /> From the start
-                </Button>
-              )}
-              {trailer && (
-                <Button
-                  size="lg"
-                  variant="secondary"
-                  onClick={() => navigate({ name: "player", ratingKey: trailer.ratingKey, resume: false })}
-                >
-                  <Clapperboard /> Trailer
-                </Button>
-              )}
-            </div>
+          {item.summary && (
+            <p className="text-muted-foreground line-clamp-4 max-w-3xl text-sm leading-relaxed">{item.summary}</p>
+          )}
+          <div className="flex items-center gap-3">
+            {target && (
+              <Button
+                size="lg"
+                onClick={() =>
+                  navigate({
+                    name: "player",
+                    ratingKey: target.ratingKey,
+                    resume: targetResumable,
+                  })
+                }
+              >
+                <Play className="fill-current" />
+                {target === item
+                  ? targetResumable
+                    ? `Resume from ${formatTime((item.viewOffset ?? 0) / 1000)}`
+                    : "Play"
+                  : `${targetResumable ? "Resume" : "Play"} ${episodeLabel(target)}`}
+              </Button>
+            )}
+            {resumable && target === item && (
+              <Button
+                size="lg"
+                variant="secondary"
+                onClick={() =>
+                  navigate({
+                    name: "player",
+                    ratingKey: item.ratingKey,
+                    resume: false,
+                  })
+                }
+              >
+                <RotateCcw /> From the start
+              </Button>
+            )}
+            {trailer && (
+              <Button
+                size="lg"
+                variant="secondary"
+                onClick={() =>
+                  navigate({
+                    name: "player",
+                    ratingKey: trailer.ratingKey,
+                    resume: false,
+                  })
+                }
+              >
+                <Clapperboard /> Trailer
+              </Button>
+            )}
+            {actions.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="icon" variant="secondary" className="size-10" title="More">
+                    <Ellipsis />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {actions.map((a) => (
+                    <div key={a.label}>
+                      {a.separated && <DropdownMenuSeparator />}
+                      <DropdownMenuCheckItem onSelect={a.run} className="pl-2 [&_svg]:size-4">
+                        <a.icon />
+                        {a.label}
+                      </DropdownMenuCheckItem>
+                    </div>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+          {target && target !== item && (
+            <p className="text-muted-foreground -mt-1 text-sm">
+              Next up: <span className="text-foreground">{target.title}</span>
+            </p>
           )}
           {item.Director.length > 0 && (
             <p className="text-muted-foreground text-sm">Directed by {item.Director.map((d) => d.tag).join(", ")}</p>
@@ -192,36 +272,41 @@ function Episodes({ episodes }: { episodes: Metadata[] | null }) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="mb-1 text-lg font-semibold">Episodes</h2>
-      {episodes === null &&
-        Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+      {episodes === null && Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
       {episodes?.map((e) => (
-        <button
-          key={e.ratingKey}
-          onClick={() => navigate({ name: "item", ratingKey: e.ratingKey })}
-          className="hover:bg-card group flex gap-5 rounded-xl p-2 text-left transition-colors"
-        >
-          <div className="bg-card relative aspect-video w-56 shrink-0 overflow-hidden rounded-lg border">
-            {e.thumb && (
-              <img src={imageUrl(server, e.thumb, 224, 126)} alt="" loading="lazy" className="size-full object-cover" />
-            )}
-            {isWatched(e) && (
-              <span className="absolute top-2 right-2 grid size-6 place-items-center rounded-full bg-black/70">
-                <Check className="size-3.5" />
-              </span>
-            )}
-            <ProgressBar value={progress(e)} />
-          </div>
-          <div className="flex min-w-0 flex-col gap-1 py-1">
-            <div className="font-medium">
-              <span className="text-muted-foreground mr-2">{e.index}</span>
-              {e.title}
+        <ItemContextMenu key={e.ratingKey} item={e}>
+          <button
+            onClick={() => navigate({ name: "item", ratingKey: e.ratingKey })}
+            className="hover:bg-card group flex gap-5 rounded-xl p-2 text-left transition-colors"
+          >
+            <div className="bg-card relative aspect-video w-56 shrink-0 overflow-hidden rounded-lg border">
+              {e.thumb && (
+                <img
+                  src={imageUrl(server, e.thumb, 224, 126)}
+                  alt=""
+                  loading="lazy"
+                  className="size-full object-cover"
+                />
+              )}
+              {isWatched(e) && (
+                <span className="absolute top-2 right-2 grid size-6 place-items-center rounded-full bg-black/70">
+                  <Check className="size-3.5" />
+                </span>
+              )}
+              <ProgressBar value={progress(e)} />
             </div>
-            <div className="text-muted-foreground text-xs">
-              {[formatDuration(e.duration), e.originallyAvailableAt].filter(Boolean).join(" · ")}
+            <div className="flex min-w-0 flex-col gap-1 py-1">
+              <div className="font-medium">
+                <span className="text-muted-foreground mr-2">{e.index}</span>
+                {e.title}
+              </div>
+              <div className="text-muted-foreground text-xs">
+                {[formatDuration(e.duration), e.originallyAvailableAt].filter(Boolean).join(" · ")}
+              </div>
+              {e.summary && <p className="text-muted-foreground line-clamp-2 text-sm">{e.summary}</p>}
             </div>
-            {e.summary && <p className="text-muted-foreground line-clamp-2 text-sm">{e.summary}</p>}
-          </div>
-        </button>
+          </button>
+        </ItemContextMenu>
       ))}
     </section>
   );

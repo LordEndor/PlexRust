@@ -38,7 +38,7 @@ export function HubRow({ hub }: { hub: Hub }) {
       >
         {hub.Metadata.map((m) => (
           <div key={m.ratingKey} className={wide ? "w-72 shrink-0 snap-start" : "w-40 shrink-0 snap-start"}>
-            <Poster item={m} wide={wide} />
+            <Poster item={m} wide={wide} continueWatching={wide} />
           </div>
         ))}
       </div>
