@@ -17,6 +17,8 @@ export interface PlaybackInfo {
   externalSubtitles: { url: string; title: string; language?: string | null }[];
   markers: Marker[];
   mpvPath: string;
+  logPath: string;
+  stripDolbyVision: boolean;
 }
 
 export type PlaybackState = "playing" | "paused" | "stopped";
