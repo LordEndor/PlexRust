@@ -58,6 +58,8 @@ pub fn run() {
             commands::metadata,
             commands::children,
             commands::search,
+            commands::get_prefs,
+            commands::set_prefs,
             player::playback_info,
             player::transcode_url,
             player::stop_transcode,

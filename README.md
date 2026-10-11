@@ -12,7 +12,7 @@ playback control, settings) is Rust; the interface is React with
 - [x] Server discovery, picking the fastest connection (local, then remote, then relay)
 - [x] Library browsing: home rows, virtualized poster grids, movie/show/season/episode pages, search
 - [x] Player: embedded mpv, direct play (HDR passthrough), optional server transcode, audio/subtitle picker, progress sync
-- [ ] Auto-skip intros and credits from Plex markers, settings page
+- [x] Skip intros and credits from Plex markers, Up Next for episodes, settings page
 
 ## Layout
 

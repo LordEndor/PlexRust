@@ -5,6 +5,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::AppState;
+use crate::settings::Prefs;
 
 pub(crate) type CmdResult<T> = Result<T, String>;
 
@@ -185,4 +186,16 @@ pub async fn children(state: State<'_, AppState>, rating_key: String) -> CmdResu
 pub async fn search(state: State<'_, AppState>, query: String) -> CmdResult<Vec<Hub>> {
     let server = current_server(&state).await?;
     state.plex.search(&server, &query).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn get_prefs(state: State<'_, AppState>) -> CmdResult<Prefs> {
+    Ok(state.settings.lock().await.prefs.clone())
+}
+
+#[tauri::command]
+pub async fn set_prefs(state: State<'_, AppState>, prefs: Prefs) -> CmdResult<()> {
+    let mut s = state.settings.lock().await;
+    s.prefs = prefs;
+    s.save(&state.settings_path).map_err(err)
 }

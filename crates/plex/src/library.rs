@@ -227,12 +227,41 @@ impl PlexClient {
         Ok(c.metadata)
     }
 
+    /// The episode after `episode`: the next one in its season, otherwise the
+    /// first episode of the following season.
+    pub async fn next_episode(&self, server: &ServerConnection, episode: &Metadata) -> Result<Option<Metadata>> {
+        let (Some(season), Some(index)) = (&episode.parent_rating_key, episode.index) else {
+            return Ok(None);
+        };
+        let episodes = self.children(server, season).await?;
+        if let Some(next) = first_after(&episodes, index) {
+            return Ok(Some(next.clone()));
+        }
+        let (Some(show), Some(season_index)) = (&episode.grandparent_rating_key, episode.parent_index) else {
+            return Ok(None);
+        };
+        let seasons = self.children(server, show).await?;
+        let Some(next_season) = first_after(&seasons, season_index) else {
+            return Ok(None);
+        };
+        let episodes = self.children(server, &next_season.rating_key).await?;
+        Ok(first_after(&episodes, i32::MIN).cloned())
+    }
+
     pub async fn search(&self, server: &ServerConnection, query: &str) -> Result<Vec<Hub>> {
         let c = self
             .container(server, "/hubs/search", &[("query", query), ("limit", "12")])
             .await?;
         Ok(c.hub.into_iter().filter(|h| !h.metadata.is_empty()).collect())
     }
+}
+
+/// The item with the lowest `index` above `after`.
+fn first_after(items: &[Metadata], after: i32) -> Option<&Metadata> {
+    items
+        .iter()
+        .filter(|m| m.index.is_some_and(|i| i > after))
+        .min_by_key(|m| m.index)
 }
 
 #[cfg(test)]
@@ -254,6 +283,15 @@ mod tests {
         assert_eq!(m.view_offset, Some(120_000));
         assert_eq!(m.media[0].video_resolution.as_deref(), Some("4k"));
         assert_eq!(m.role[0].role.as_deref(), Some("Hero"));
+    }
+
+    #[test]
+    fn first_after_picks_the_next_index() {
+        let item = |key: &str, index| Metadata { rating_key: key.into(), index: Some(index), ..Default::default() };
+        let items = [item("a", 3), item("b", 1), item("c", 2)];
+        assert_eq!(first_after(&items, 1).unwrap().rating_key, "c");
+        assert_eq!(first_after(&items, i32::MIN).unwrap().rating_key, "b");
+        assert!(first_after(&items, 3).is_none());
     }
 
     #[test]
