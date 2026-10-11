@@ -16,8 +16,9 @@ uuid = { version = "1", features = ["v4"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
-codegen-units = 1
-lto = true
+# Thin LTO keeps most of the size and speed win of full LTO while building
+# in parallel, which cuts minutes off every release build.
+lto = "thin"
 opt-level = 3
 panic = "abort"
 strip = true
