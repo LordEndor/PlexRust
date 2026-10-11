@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use plex::{ServerConnection, User};
@@ -13,6 +14,21 @@ pub struct Settings {
     pub user: Option<User>,
     pub server: Option<ServerConnection>,
     pub prefs: Prefs,
+    /// Audio and subtitle picks per show (or movie), keyed by rating key.
+    pub tracks: BTreeMap<String, TrackChoice>,
+}
+
+/// The tracks someone picked, described so they can be found again in
+/// another episode: by language, and by title when the file names them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TrackChoice {
+    pub audio_language: Option<String>,
+    pub audio_title: Option<String>,
+    pub subtitles_off: bool,
+    pub subtitle_language: Option<String>,
+    pub subtitle_title: Option<String>,
+    pub subtitle_forced: bool,
 }
 
 /// Choices made on the settings page.

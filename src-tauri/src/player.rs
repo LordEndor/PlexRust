@@ -1,14 +1,77 @@
 //! Commands behind the player screen. mpv itself is driven from the UI via
 //! tauri-plugin-mpv; Rust works out what to play and keeps Plex in sync.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
-use plex::{Marker, Metadata, TranscodeOptions};
+use plex::{Chapter, Marker, Metadata, PreviewIndex, TranscodeOptions};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
 use crate::AppState;
 use crate::commands::{CmdResult, current_server, err};
+use crate::settings::TrackChoice;
+
+/// Seek-bar thumbnails for recently played files, served to the UI through
+/// `plximg://` (see images.rs).
+#[derive(Default)]
+pub struct PreviewStore {
+    map: Mutex<HashMap<u64, Arc<PreviewIndex>>>,
+}
+
+impl PreviewStore {
+    pub fn get(&self, part_id: u64) -> Option<Arc<PreviewIndex>> {
+        self.map.lock().ok()?.get(&part_id).cloned()
+    }
+
+    fn put(&self, part_id: u64, index: Arc<PreviewIndex>) {
+        let Ok(mut map) = self.map.lock() else { return };
+        // A few MB each; only the file being watched matters.
+        if map.len() >= 3 {
+            map.clear();
+        }
+        map.insert(part_id, index);
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewInfo {
+    count: usize,
+    interval_ms: u32,
+}
+
+/// Fetches the thumbnail index for a file so the seek bar can show previews.
+/// `None` when the server has none.
+#[tauri::command]
+pub async fn load_previews(
+    state: State<'_, AppState>,
+    store: State<'_, PreviewStore>,
+    part_id: u64,
+) -> CmdResult<Option<PreviewInfo>> {
+    let index = match store.get(part_id) {
+        Some(index) => index,
+        None => {
+            let server = current_server(&state).await?;
+            let Some(index) = state.plex.preview_index(&server, part_id).await.map_err(err)? else {
+                return Ok(None);
+            };
+            let index = Arc::new(index);
+            store.put(part_id, index.clone());
+            index
+        }
+    };
+    Ok((!index.is_empty()).then(|| PreviewInfo { count: index.len(), interval_ms: index.interval_ms }))
+}
+
+/// Saves the audio and subtitle picks for a show, for its next episodes.
+#[tauri::command]
+pub async fn remember_tracks(state: State<'_, AppState>, key: String, choice: TrackChoice) -> CmdResult<()> {
+    let mut s = state.settings.lock().await;
+    s.tracks.insert(key, choice);
+    s.save(&state.settings_path).map_err(err)
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +112,13 @@ pub struct PlaybackInfo {
     /// use and which otherwise can leave the screen black.
     strip_dolby_vision: bool,
     next: Option<NextUp>,
+    /// The file's id on the server, for seek-bar thumbnails.
+    part_id: Option<u64>,
+    has_previews: bool,
+    chapters: Vec<Chapter>,
+    /// Remembered tracks are stored under this key: the show for episodes.
+    track_key: String,
+    remembered_tracks: Option<TrackChoice>,
 }
 
 /// mpv ships inside the installer under `mpv/`; in development fall back to
@@ -121,6 +191,8 @@ pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_ke
         .iter()
         .any(|s| s.stream_type == Some(1) && s.dovi_profile == Some(7));
 
+    let track_key = item.grandparent_rating_key.clone().unwrap_or_else(|| item.rating_key.clone());
+
     let subtitle = match item.kind.as_str() {
         "episode" => Some(episode_label(&item)),
         _ => item.year.map(|y| y.to_string()),
@@ -150,6 +222,11 @@ pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_ke
         log_path: log_path(&app),
         strip_dolby_vision,
         next,
+        part_id: part.id,
+        has_previews: part.indexes.as_deref() == Some("sd"),
+        chapters: item.chapters.clone(),
+        remembered_tracks: state.settings.lock().await.tracks.get(&track_key).cloned(),
+        track_key,
     })
 }
 
