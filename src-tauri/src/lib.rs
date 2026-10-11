@@ -1,4 +1,5 @@
 mod commands;
+mod images;
 mod settings;
 
 use std::path::PathBuf;
@@ -17,6 +18,9 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol("plximg", |ctx, request, responder| {
+            images::handle(ctx.app_handle(), request, responder)
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -31,6 +35,7 @@ pub fn run() {
                 platform: "Windows".into(),
                 device_name: hostname(),
             })?;
+            app.manage(images::ImageCache::default());
             app.manage(AppState {
                 plex,
                 settings: Mutex::new(settings),

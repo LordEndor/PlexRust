@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Check } from "lucide-react";
 
 import { imageUrl, type Metadata } from "@/lib/api";
@@ -54,6 +55,7 @@ export function Poster({ item, wide, className }: Props) {
   const { server, navigate } = useNav();
   const size = wide ? WIDE : POSTER;
   const src = imageUrl(server, wide ? widePath(item) : posterPath(item), size.w, size.h);
+  const [failed, setFailed] = useState(false);
 
   return (
     <button
@@ -68,8 +70,16 @@ export function Poster({ item, wide, className }: Props) {
           wide ? "aspect-video" : "aspect-[2/3]",
         )}
       >
-        {src ? (
-          <img src={src} alt="" loading="lazy" decoding="async" draggable={false} className="size-full object-cover" />
+        {src && !failed ? (
+          <img
+            src={src}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            onError={() => setFailed(true)}
+            className="size-full object-cover"
+          />
         ) : (
           <div className="text-muted-foreground grid size-full place-items-center p-3 text-center text-sm">
             {item.title}
