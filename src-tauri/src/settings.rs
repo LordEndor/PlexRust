@@ -1,0 +1,37 @@
+use std::path::PathBuf;
+
+use plex::{ServerConnection, User};
+use serde::{Deserialize, Serialize};
+
+/// Everything persisted between launches, stored as JSON in the app's config
+/// directory.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Settings {
+    pub client_id: String,
+    pub token: Option<String>,
+    pub user: Option<User>,
+    pub server: Option<ServerConnection>,
+}
+
+impl Settings {
+    pub fn load(path: &PathBuf) -> Self {
+        let mut s: Settings = std::fs::read(path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        if s.client_id.is_empty() {
+            s.client_id = uuid::Uuid::new_v4().to_string();
+        }
+        s
+    }
+
+    pub fn save(&self, path: &PathBuf) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
+        std::fs::rename(tmp, path)
+    }
+}

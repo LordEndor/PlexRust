@@ -1,0 +1,16 @@
+[package]
+name = "plex"
+description = "Async client for plex.tv and Plex Media Server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+futures = "0.3"
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread"] }
