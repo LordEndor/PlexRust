@@ -381,6 +381,11 @@ async function playbackInfo(ratingKey: string): Promise<WebPlaybackInfo> {
     logPath: "",
     stripDolbyVision: false,
     next: next ? { ratingKey: next.ratingKey, title: next.title, subtitle: episodeLabel(next), thumb: next.thumb } : null,
+    // Seek previews, chapters and remembered tracks are desktop-only for now.
+    hasPreviews: false,
+    chapters: [],
+    trackKey: m.grandparentRatingKey ?? m.ratingKey,
+    rememberedTracks: null,
     partId: part.id,
     audioStreams: streams.filter((s) => s.streamType === 2),
     subtitleStreams: streams.filter((s) => s.streamType === 3),
