@@ -46,6 +46,11 @@ pub fn run() {
             commands::list_servers,
             commands::select_server,
             commands::library_sections,
+            commands::home_hubs,
+            commands::section_items,
+            commands::metadata,
+            commands::children,
+            commands::search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

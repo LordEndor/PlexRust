@@ -10,8 +10,7 @@ playback control, settings) is Rust; the interface is React with
 
 - [x] Sign in with Plex (plex.tv PIN, approved in the browser)
 - [x] Server discovery, picking the fastest connection (local, then remote, then relay)
-- [x] Library list
-- [ ] Library browsing: home rows, posters, show/season/episode pages, search
+- [x] Library browsing: home rows, virtualized poster grids, movie/show/season/episode pages, search
 - [ ] Player: embedded libmpv, direct play 4K HDR, transcode fallback, track picker, progress sync
 - [ ] Auto-skip intros and credits from Plex markers, settings page
 

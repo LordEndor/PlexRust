@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use plex::{LibrarySection, Pin, ServerConnection, User};
+use plex::{Hub, LibrarySection, Metadata, Page, Pin, ServerConnection, User};
 use serde::Serialize;
 use tauri::State;
 
@@ -126,14 +126,63 @@ pub async fn select_server(state: State<'_, AppState>, machine_id: String) -> Cm
     Ok(conn)
 }
 
-#[tauri::command]
-pub async fn library_sections(state: State<'_, AppState>) -> CmdResult<Vec<LibrarySection>> {
-    let server = state
+async fn current_server(state: &AppState) -> CmdResult<ServerConnection> {
+    state
         .settings
         .lock()
         .await
         .server
         .clone()
-        .ok_or("No server selected")?;
+        .ok_or_else(|| "No server selected".to_owned())
+}
+
+#[tauri::command]
+pub async fn library_sections(state: State<'_, AppState>) -> CmdResult<Vec<LibrarySection>> {
+    let server = current_server(&state).await?;
     state.plex.library_sections(&server).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn home_hubs(state: State<'_, AppState>) -> CmdResult<Vec<Hub>> {
+    let server = current_server(&state).await?;
+    state.plex.home_hubs(&server).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn section_items(
+    state: State<'_, AppState>,
+    section: String,
+    start: u32,
+    size: u32,
+    sort: String,
+) -> CmdResult<Page> {
+    let server = current_server(&state).await?;
+    state
+        .plex
+        .section_items(&server, &section, start, size, &sort)
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn metadata(state: State<'_, AppState>, rating_key: String) -> CmdResult<Metadata> {
+    let server = current_server(&state).await?;
+    state
+        .plex
+        .metadata(&server, &rating_key)
+        .await
+        .map_err(err)?
+        .ok_or_else(|| "That item no longer exists on the server".to_owned())
+}
+
+#[tauri::command]
+pub async fn children(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
+    let server = current_server(&state).await?;
+    state.plex.children(&server, &rating_key).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn search(state: State<'_, AppState>, query: String) -> CmdResult<Vec<Hub>> {
+    let server = current_server(&state).await?;
+    state.plex.search(&server, &query).await.map_err(err)
 }
