@@ -106,3 +106,49 @@ mod tests {
         assert_eq!(c.media_container.directory[1].kind, "show");
     }
 }
+
+impl PlexClient {
+    /// An image from `server`, resized by its photo transcoder. `path` is a
+    /// library path such as `/library/metadata/1/thumb/2` or an absolute URL
+    /// (cast photos). Falls back to the original image if the transcoder
+    /// refuses. Returns the bytes and their content type.
+    pub async fn image(
+        &self,
+        server: &ServerConnection,
+        path: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<(Vec<u8>, String)> {
+        let (w, h) = (width.to_string(), height.to_string());
+        let transcoded = self
+            .http
+            .get(format!("{}/photo/:/transcode", server.uri))
+            .query(&[("width", w.as_str()), ("height", &h), ("minSize", "1"), ("upscale", "1"), ("url", path)])
+            .header("X-Plex-Token", &server.token)
+            .header("Accept", "image/*")
+            .send()
+            .await;
+        let resp = match transcoded {
+            Ok(r) if r.status().is_success() => r,
+            _ if path.starts_with('/') => {
+                let r = self
+                    .http
+                    .get(format!("{}{path}", server.uri))
+                    .header("X-Plex-Token", &server.token)
+                    .header("Accept", "image/*")
+                    .send()
+                    .await?;
+                check(r).await?
+            }
+            Ok(r) => check(r).await?,
+            Err(e) => return Err(e.into()),
+        };
+        let kind = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("image/jpeg")
+            .to_owned();
+        Ok((resp.bytes().await?.to_vec(), kind))
+    }
+}

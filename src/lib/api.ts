@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
 export interface User {
   id: number;
@@ -132,19 +132,18 @@ export const library = {
 };
 
 /**
- * URL for a Plex image resized on the server, so the UI never downloads
- * full-size artwork for a 200px poster.
+ * URL for a Plex image, resized on the server to the size it is shown at.
+ * It points at the app's `plximg` protocol: Rust fetches and caches the image,
+ * so the page never connects to the Plex server or sees the token.
  */
 export function imageUrl(server: ServerConnection, path: string | null | undefined, width: number, height: number) {
   if (!path) return undefined;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const params = new URLSearchParams({
-    width: String(Math.round(width * dpr)),
-    height: String(Math.round(height * dpr)),
-    minSize: "1",
-    upscale: "1",
+    s: server.machineId,
+    w: String(Math.round(width * dpr)),
+    h: String(Math.round(height * dpr)),
     url: path,
-    "X-Plex-Token": server.token,
   });
-  return `${server.uri}/photo/:/transcode?${params}`;
+  return `${convertFileSrc("", "plximg")}?${params}`;
 }

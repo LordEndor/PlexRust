@@ -201,6 +201,7 @@ function Episodes({ episodes }: { episodes: Metadata[] | null }) {
 }
 
 function Cast({ item }: { item: Metadata }) {
+  const { server } = useNav();
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold">Cast</h2>
@@ -208,7 +209,7 @@ function Cast({ item }: { item: Metadata }) {
         {item.Role.slice(0, 20).map((r) => (
           <div key={`${r.tag}-${r.role}`} className="flex w-24 shrink-0 flex-col items-center gap-2 text-center">
             <Avatar className="size-20">
-              {r.thumb && <AvatarImage src={r.thumb} alt={r.tag} className="object-cover" />}
+              {r.thumb && <AvatarImage src={imageUrl(server, r.thumb, 80, 80)} alt={r.tag} className="object-cover" />}
               <AvatarFallback>{r.tag.slice(0, 1)}</AvatarFallback>
             </Avatar>
             <div className="w-full">
