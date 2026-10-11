@@ -153,6 +153,10 @@ export const library = {
   collections: (section: string) => invoke<Metadata[]>("collections", { section }),
   collectionItems: (ratingKey: string) => invoke<Metadata[]>("collection_items", { ratingKey }),
   trailers: (ratingKey: string) => invoke<Metadata[]>("trailers", { ratingKey }),
+  setWatched: (ratingKey: string, watched: boolean) => invoke<void>("set_watched", { ratingKey, watched }),
+  removeFromContinueWatching: (ratingKey: string) => invoke<void>("remove_from_continue_watching", { ratingKey }),
+  /** The episode a show or season's Play button starts; null once all are watched. */
+  upNext: (ratingKey: string) => invoke<Metadata | null>("up_next", { ratingKey }),
   metadata: (ratingKey: string) => invoke<Metadata>("metadata", { ratingKey }),
   children: (ratingKey: string) => invoke<Metadata[]>("children", { ratingKey }),
   search: (query: string) => invoke<Hub[]>("search", { query }),

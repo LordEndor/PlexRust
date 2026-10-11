@@ -217,6 +217,31 @@ pub async fn collection_items(state: State<'_, AppState>, rating_key: String) ->
 }
 
 #[tauri::command]
+pub async fn set_watched(state: State<'_, AppState>, rating_key: String, watched: bool) -> CmdResult<()> {
+    let server = current_server(&state).await?;
+    state.plex.set_watched(&server, &rating_key, watched).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn remove_from_continue_watching(state: State<'_, AppState>, rating_key: String) -> CmdResult<()> {
+    let server = current_server(&state).await?;
+    state.plex.remove_from_continue_watching(&server, &rating_key).await.map_err(err)
+}
+
+/// The episode a show or season page's Play button starts.
+#[tauri::command]
+pub async fn up_next(state: State<'_, AppState>, rating_key: String) -> CmdResult<Option<Metadata>> {
+    let server = current_server(&state).await?;
+    let item = state
+        .plex
+        .metadata(&server, &rating_key)
+        .await
+        .map_err(err)?
+        .ok_or("That item no longer exists on the server")?;
+    state.plex.up_next(&server, &item).await.map_err(err)
+}
+
+#[tauri::command]
 pub async fn trailers(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
     let server = current_server(&state).await?;
     state.plex.trailers(&server, &rating_key).await.map_err(err)
