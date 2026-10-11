@@ -121,6 +121,9 @@ pub struct Stream {
     /// Set for subtitles stored next to the video rather than inside it.
     pub key: Option<String>,
     pub forced: Option<bool>,
+    /// Dolby Vision profile of a video stream, when it has one.
+    #[serde(rename = "DOVIProfile")]
+    pub dovi_profile: Option<u8>,
 }
 
 /// A row of items, as shown on the home screen or in search results.
@@ -251,6 +254,18 @@ mod tests {
         assert_eq!(m.view_offset, Some(120_000));
         assert_eq!(m.media[0].video_resolution.as_deref(), Some("4k"));
         assert_eq!(m.role[0].role.as_deref(), Some("Hero"));
+    }
+
+    #[test]
+    fn parses_dolby_vision_profile() {
+        let json = r#"{"MediaContainer":{"Metadata":[{"ratingKey":"9","type":"movie","title":"Collateral",
+            "Media":[{"Part":[{"key":"/library/parts/1/2/file.mkv","Stream":[
+                {"streamType":1,"codec":"hevc","DOVIPresent":true,"DOVIProfile":7,"DOVIBLCompatID":6},
+                {"streamType":2,"codec":"dca"}]}]}]}]}}"#;
+        let body: Body = serde_json::from_str(json).unwrap();
+        let streams = &body.container.metadata[0].media[0].part[0].stream;
+        assert_eq!(streams[0].dovi_profile, Some(7));
+        assert_eq!(streams[1].dovi_profile, None);
     }
 
     #[test]

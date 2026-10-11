@@ -34,6 +34,10 @@ pub struct PlaybackInfo {
     mpv_path: String,
     /// Where mpv writes its log, so failed playback can be diagnosed.
     log_path: String,
+    /// Play only the HDR10 base layer and ignore the Dolby Vision data.
+    /// Set for profile 7 (UHD Blu-ray), whose enhancement layer mpv can't
+    /// use and which otherwise can leave the screen black.
+    strip_dolby_vision: bool,
 }
 
 /// mpv ships inside the installer under `mpv/`; in development fall back to
@@ -92,6 +96,11 @@ pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_ke
         })
         .collect();
 
+    let strip_dolby_vision = part
+        .stream
+        .iter()
+        .any(|s| s.stream_type == Some(1) && s.dovi_profile == Some(7));
+
     let subtitle = match item.kind.as_str() {
         "episode" => Some(format!(
             "{} · S{} · E{}",
@@ -113,6 +122,7 @@ pub async fn playback_info(app: AppHandle, state: State<'_, AppState>, rating_ke
         markers: item.markers,
         mpv_path: mpv_path(&app),
         log_path: log_path(&app),
+        strip_dolby_vision,
     })
 }
 

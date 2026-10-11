@@ -222,6 +222,7 @@ export function Player({ ratingKey, resume, onClose }: Props) {
           }),
         );
 
+        if (pi.stripDolbyVision) await setProperty<string>("vf", "format:dolbyvision=no");
         await load(pi.url, start);
       } catch (e) {
         if (!disposed) setError(errorMessage(e));

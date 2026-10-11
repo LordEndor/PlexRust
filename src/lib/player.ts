@@ -18,6 +18,7 @@ export interface PlaybackInfo {
   markers: Marker[];
   mpvPath: string;
   logPath: string;
+  stripDolbyVision: boolean;
 }
 
 export type PlaybackState = "playing" | "paused" | "stopped";
