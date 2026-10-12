@@ -12,6 +12,7 @@ export type Route =
   | { name: "discover"; query?: string }
   | { name: "request"; mediaType: MediaType; tmdbId: number }
   | { name: "requests" }
+  | { name: "calendar" }
   | { name: "playlists" }
   | { name: "playlist"; ratingKey: string }
   /** `playlist` plays on through that playlist rather than the show. */
@@ -49,6 +50,8 @@ export function routeKey(r: Route) {
       return `request:${r.mediaType}:${r.tmdbId}`;
     case "requests":
       return "requests";
+    case "calendar":
+      return "calendar";
     case "playlists":
       return "playlists";
     case "playlist":

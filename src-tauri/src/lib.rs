@@ -1,3 +1,4 @@
+mod calendar;
 mod commands;
 mod images;
 mod player;
@@ -92,6 +93,10 @@ pub fn run() {
             requests::seerr_request,
             requests::seerr_requests,
             requests::seerr_cancel,
+            calendar::arr_config,
+            calendar::arr_connect,
+            calendar::arr_disconnect,
+            calendar::arr_calendar,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
