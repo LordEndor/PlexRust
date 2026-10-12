@@ -4,6 +4,7 @@ mod images;
 mod player;
 mod requests;
 mod settings;
+mod window_state;
 
 use std::path::PathBuf;
 
@@ -48,6 +49,9 @@ pub fn run() {
                 settings: Mutex::new(settings),
                 settings_path,
             });
+            if let Some(window) = app.get_webview_window("main") {
+                window_state::manage(&window);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
