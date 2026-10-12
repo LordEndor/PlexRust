@@ -95,6 +95,10 @@ const FALLBACK = QUALITIES[1];
 const UP_NEXT_SECS = 10;
 const HIDE_CONTROLS_MS = 3000;
 
+// Leaving fullscreen waits a tick after the player closes, so the next
+// episode (a fresh Player mounted in the same render) can cancel it.
+let exitFullscreenTimer: number | undefined;
+
 interface Track {
   id: number;
   type: "video" | "audio" | "sub";
@@ -392,11 +396,24 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       destroy().catch(() => {});
       if (transcoding.current) playback.stopTranscode(session.current).catch(() => {});
       document.documentElement.classList.remove("playing");
-      getCurrentWindow()
-        .setFullscreen(false)
-        .catch(() => {});
     };
   }, [ratingKey, resume, report, playlist]);
+
+  // Stay fullscreen from one episode to the next; leave it only when playback ends.
+  useEffect(() => {
+    window.clearTimeout(exitFullscreenTimer);
+    getCurrentWindow()
+      .isFullscreen()
+      .then(setFullscreen)
+      .catch(() => {});
+    return () => {
+      exitFullscreenTimer = window.setTimeout(() => {
+        getCurrentWindow()
+          .setFullscreen(false)
+          .catch(() => {});
+      });
+    };
+  }, []);
 
   // Keep Plex's Continue Watching in step while playing.
   useEffect(() => {
