@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-/** Requests go through the Rust side, so the browser version has none (Seerr blocks cross-site calls). */
-export const SEERR_SUPPORTED = import.meta.env.MODE !== "web";
-
 export type MediaType = "movie" | "tv";
 
 export interface SeerrConfig {
@@ -123,7 +120,7 @@ export const DISCOVER_ROWS = [
   { key: "upcomingTv", title: "Upcoming shows" },
 ] as const;
 
-/** Typed wrappers around `src-tauri/src/requests.rs`. */
+/** Typed wrappers around `src-tauri/src/requests.rs` (`src/web/services.ts` in the browser). */
 export const seerr = {
   config: () => invoke<SeerrConfig>("seerr_config"),
   connect: (url: string, apiKey: string | null, clearApiKey = false) =>
@@ -149,9 +146,8 @@ export function notifySeerrConfigChanged() {
 
 /** Whether a Seerr server is set up; null while loading. */
 export function useSeerrEnabled(): boolean | null {
-  const [enabled, setEnabled] = useState<boolean | null>(SEERR_SUPPORTED ? null : false);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
   useEffect(() => {
-    if (!SEERR_SUPPORTED) return;
     const load = () =>
       seerr
         .config()

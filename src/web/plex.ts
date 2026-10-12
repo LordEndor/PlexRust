@@ -21,6 +21,7 @@ import type {
 } from "@/lib/api";
 import type { Chapter, Episode, Marker, PlaybackInfo } from "@/lib/player";
 import { DEFAULT_PREFS, type Prefs } from "@/lib/prefs";
+import { serviceCommands } from "@/web/services";
 
 const PLEX_TV = "https://plex.tv";
 const CLIENTS_PLEX_TV = "https://clients.plex.tv";
@@ -702,7 +703,7 @@ const commands: Record<string, Command> = {
 };
 
 export async function invokeWeb<T>(cmd: string, args: Args = {}): Promise<T> {
-  const run = commands[cmd];
+  const run = commands[cmd] ?? serviceCommands[cmd];
   if (!run) throw new Error(`${cmd} isn't available in the browser version`);
   return (await run(args)) as T;
 }

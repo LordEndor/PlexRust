@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-/** The calendar is read through the Rust side; the browser build (served over HTTPS) can't reach a plain-HTTP Radarr or Sonarr. */
-export const CALENDAR_SUPPORTED = import.meta.env.MODE !== "web";
-
 export type ArrKind = "radarr" | "sonarr";
 
 export const ARR_NAMES: Record<ArrKind, string> = { radarr: "Radarr", sonarr: "Sonarr" };
@@ -52,7 +49,7 @@ export interface Calendar {
   errors: { source: ArrKind; message: string }[];
 }
 
-/** Typed wrappers around `src-tauri/src/calendar.rs`. */
+/** Typed wrappers around `src-tauri/src/calendar.rs` (`src/web/services.ts` in the browser). */
 export const arr = {
   config: () => invoke<ArrConfig>("arr_config"),
   connect: (kind: ArrKind, url: string, apiKey: string | null) => invoke<ArrStatus>("arr_connect", { kind, url, apiKey }),
@@ -69,9 +66,8 @@ export function notifyArrConfigChanged() {
 
 /** Whether Radarr or Sonarr is set up; null while loading. */
 export function useCalendarEnabled(): boolean | null {
-  const [enabled, setEnabled] = useState<boolean | null>(CALENDAR_SUPPORTED ? null : false);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
   useEffect(() => {
-    if (!CALENDAR_SUPPORTED) return;
     const load = () =>
       arr
         .config()
