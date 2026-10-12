@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { FeaturedBanner, featuredItems } from "@/components/FeaturedBanner";
 import { HubRow } from "@/components/HubRow";
 import { Skeleton } from "@/components/ui/skeleton";
-import { errorMessage, library, type Hub } from "@/lib/api";
+import { errorMessage, library, type Hub, type Metadata } from "@/lib/api";
 import { useLibraryChanged } from "@/lib/changes";
 import { arrangeHubs, posterSize, usePrefs } from "@/lib/prefs";
 
@@ -11,7 +11,8 @@ export function HomeView() {
   const [hubs, setHubs] = useState<Hub[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const prefs = usePrefs();
-  const featured = useMemo(() => (hubs && prefs?.showFeatured !== false ? featuredItems(hubs) : []), [hubs, prefs]);
+  const [featured, setFeatured] = useState<Metadata[]>([]);
+  const showFeatured = prefs?.showFeatured !== false;
   const rows = useMemo(() => (hubs ? arrangeHubs(hubs, prefs) : null), [hubs, prefs]);
   const width = posterSize(prefs).poster;
 
@@ -29,6 +30,17 @@ export function HomeView() {
   }, []);
 
   useEffect(load, [load]);
+
+  useEffect(() => {
+    if (!hubs || !showFeatured) return setFeatured([]);
+    let live = true;
+    featuredItems(hubs)
+      .then((items) => live && setFeatured(items))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [hubs, showFeatured]);
   useLibraryChanged(load);
 
   return (
