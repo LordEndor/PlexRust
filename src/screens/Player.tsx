@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { errorMessage, imageUrl } from "@/lib/api";
 import { SkipButton } from "@/components/SkipButton";
+import { WindowControls } from "@/components/TitleBar";
 import { skipSegments, useSkips } from "@/lib/skips";
 import { useNav } from "@/lib/nav";
 import { loadPrefs, usePrefs } from "@/lib/prefs";
@@ -634,7 +635,11 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
           controls ? "opacity-100" : "opacity-0",
         )}
       >
-        <div className="pointer-events-auto absolute inset-x-0 top-0 flex items-center gap-4 bg-gradient-to-b from-black/80 to-transparent px-6 pt-5 pb-16">
+        <div
+          data-tauri-drag-region
+          className="pointer-events-auto absolute inset-x-0 top-0 flex items-center gap-4 bg-gradient-to-b from-black/80 to-transparent px-6 pt-5 pb-16"
+        >
+          {!fullscreen && <WindowControls className="absolute top-0 right-0 [&_button]:text-white/80" />}
           <Button variant="ghost" size="icon" onClick={onClose} title="Back (Esc)" className="text-white hover:bg-white/10">
             <ArrowLeft className="size-5" />
           </Button>

@@ -34,6 +34,7 @@ import { ItemView } from "@/screens/ItemView";
 import { LibraryView } from "@/screens/LibraryView";
 import { PlaylistsView, PlaylistView } from "@/screens/PlaylistView";
 import { Player } from "@/screens/Player";
+import { HAS_TITLE_BAR, WindowControls } from "@/components/TitleBar";
 import { RequestsView } from "@/screens/RequestsView";
 import { RequestView } from "@/screens/RequestView";
 import { SearchView } from "@/screens/SearchView";
@@ -155,8 +156,15 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
             collapsed ? "w-[4.25rem]" : "w-60",
           )}
         >
-          <div className={cn("flex items-center gap-2 py-2", collapsed ? "justify-center" : "pl-2")}>
-            {!collapsed && <span className="flex-1 truncate text-lg font-semibold">PlexRust</span>}
+          <div
+            data-tauri-drag-region
+            className={cn("flex items-center gap-2 py-2", collapsed ? "justify-center" : "pl-2")}
+          >
+            {!collapsed && (
+              <span data-tauri-drag-region className="flex-1 truncate text-lg font-semibold">
+                PlexRust
+              </span>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -233,7 +241,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center gap-3 border-b px-6 py-3">
+          <header data-tauri-drag-region className="flex items-center gap-3 border-b py-3 pl-6">
             <Button variant="ghost" size="icon" onClick={back} disabled={stack.length < 2} title="Back">
               <ArrowLeft />
             </Button>
@@ -246,11 +254,12 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
                 className="bg-input/30 border-input focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-lg border pr-3 pl-9 text-sm outline-none focus-visible:ring-[3px]"
               />
             </div>
-            <div className="flex-1" />
+            <div data-tauri-drag-region className="flex-1" />
             <Button variant="outline" size="sm" onClick={onSwitchServer}>
               <Server /> {server.name}
               <Badge variant="secondary">{server.relay ? "Relay" : server.local ? "Local" : "Remote"}</Badge>
             </Button>
+            {HAS_TITLE_BAR ? <WindowControls className="-mt-3 self-start" /> : <div className="w-3" />}
           </header>
 
           {error && <p className="text-destructive px-8 pt-4 text-sm">{error}</p>}
