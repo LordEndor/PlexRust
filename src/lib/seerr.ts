@@ -120,6 +120,24 @@ export const DISCOVER_ROWS = [
   { key: "upcomingTv", title: "Upcoming shows" },
 ] as const;
 
+export type DiscoverRowKey = (typeof DISCOVER_ROWS)[number]["key"];
+
+/** Narrows and orders a full category page; see `Browse` in `crates/seerr`. */
+export interface Browse {
+  sortBy?: string;
+  genre?: number;
+  /** `YYYY-MM-DD` */
+  dateFrom?: string;
+  dateTo?: string;
+  minRating?: number;
+  minVotes?: number;
+}
+
+export interface Genre {
+  id: number;
+  name: string;
+}
+
 /** Typed wrappers around `src-tauri/src/requests.rs` (`src/web/services.ts` in the browser). */
 export const seerr = {
   config: () => invoke<SeerrConfig>("seerr_config"),
@@ -129,6 +147,9 @@ export const seerr = {
   info: () => invoke<SeerrInfo>("seerr_info"),
   search: (query: string, page = 1) => invoke<SeerrPage>("seerr_search", { query, page }),
   discover: (row: string, page = 1) => invoke<SeerrPage>("seerr_discover", { row, page }),
+  browse: (mediaType: MediaType, page: number, browse: Browse) =>
+    invoke<SeerrPage>("seerr_browse", { mediaType, page, browse }),
+  genres: (mediaType: MediaType) => invoke<Genre[]>("seerr_genres", { mediaType }),
   details: (mediaType: MediaType, tmdbId: number) => invoke<SeerrDetails>("seerr_details", { mediaType, tmdbId }),
   quota: () => invoke<Quota>("seerr_quota"),
   request: (mediaType: MediaType, tmdbId: number, seasons: number[] = [], is4k = false) =>

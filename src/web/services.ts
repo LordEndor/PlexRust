@@ -10,7 +10,7 @@
  * (see docs/seerr-in-browser.md).
  */
 import type { ArrConfig, ArrKind, ArrStatus, Calendar, MovieRelease, Release } from "@/lib/calendar";
-import type { MediaType, SeerrConfig, SeerrInfo } from "@/lib/seerr";
+import type { Browse, MediaType, SeerrConfig, SeerrInfo } from "@/lib/seerr";
 
 const TIMEOUT_MS = 20_000;
 const KEYS = { arr: "plexrust.arr", seerr: "plexrust.seerr" };
@@ -421,6 +421,26 @@ export const serviceCommands: Record<string, (args: Args) => Promise<unknown>> =
     const path = DISCOVER_PATHS[row as string];
     if (!path) throw new Error(`unknown discover row ${row}`);
     return seerrSend(s, "GET", path, { page: (page as number) ?? 1 });
+  },
+
+  /** Mirrors `Browse::query` in `crates/seerr`. */
+  async seerr_browse({ mediaType, page, browse }) {
+    const { s } = await seerrConnection();
+    const movie = (mediaType as MediaType) === "movie";
+    const b = (browse ?? {}) as Browse;
+    const query: Record<string, string | number> = { page: (page as number) ?? 1 };
+    if (b.sortBy) query.sortBy = b.sortBy;
+    if (b.genre != null) query.genre = b.genre;
+    if (b.dateFrom) query[movie ? "primaryReleaseDateGte" : "firstAirDateGte"] = b.dateFrom;
+    if (b.dateTo) query[movie ? "primaryReleaseDateLte" : "firstAirDateLte"] = b.dateTo;
+    if (b.minRating) query.voteAverageGte = b.minRating;
+    if (b.minVotes) query.voteCountGte = b.minVotes;
+    return seerrSend(s, "GET", movie ? "/discover/movies" : "/discover/tv", query);
+  },
+
+  async seerr_genres({ mediaType }) {
+    const { s } = await seerrConnection();
+    return seerrSend(s, "GET", `/genres/${mediaType as MediaType}`);
   },
 
   async seerr_details({ mediaType, tmdbId }) {
