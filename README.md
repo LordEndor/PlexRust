@@ -52,7 +52,8 @@ Settings, Calendar takes the address and API key of Radarr (port 7878 by
 default) and Sonarr (port 8989); either one is enough. The API key is in each
 app under Settings, General. Calendar then appears in the sidebar with a month
 view and an upcoming list of the next 60 days. Movies show each release date
-Radarr knows (in cinemas, digital, Blu-ray/DVD), episodes show their air time
+Radarr knows (digital and Blu-ray/DVD; cinema dates behind the In cinemas
+toggle), episodes show their air time
 in your time zone, and a check marks what is already downloaded. Like
 requests, it's only in the desktop app: the browser build is served over
 HTTPS and can't call a plain-HTTP server on your network.
