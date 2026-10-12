@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
+import type { CustomRow } from "@/lib/customRows";
+
 export type SkipMode = "auto" | "button" | "off";
 
 export interface Prefs {
@@ -27,6 +29,8 @@ export interface Prefs {
   hiddenHubs: string[];
   /** The last sort picked in each library, such as `addedAt:desc`, by section key. */
   librarySorts: Record<string, string>;
+  /** Home rows made on the settings page, such as "Highest rated movies". */
+  customRows: CustomRow[];
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -43,6 +47,7 @@ export const DEFAULT_PREFS: Prefs = {
   hubOrder: [],
   hiddenHubs: [],
   librarySorts: {},
+  customRows: [],
 };
 
 // One copy for the whole app, so the settings page and the player agree.

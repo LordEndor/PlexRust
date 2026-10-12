@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
-import { ArrowDown, ArrowUp, Check, ChevronDown, Eye, EyeOff, Loader2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, Eye, EyeOff, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuCheckItem,
@@ -13,7 +14,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
-import { errorMessage, library, type Hub } from "@/lib/api";
+import { api, errorMessage, library, type FilterValue, type Hub, type LibrarySection } from "@/lib/api";
+import { customHubId, newRowId, presets, type CustomRow } from "@/lib/customRows";
 import { QUALITIES } from "@/lib/player";
 import {
   ACCENTS,
@@ -28,6 +30,7 @@ import {
 import { arr, ARR_NAMES, notifyArrConfigChanged, type ArrKind, type ArrStatus } from "@/lib/calendar";
 import { notifySeerrConfigChanged, seerr, type SeerrInfo } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
+import { SORTS } from "@/screens/LibraryView";
 
 /** The GitHub Pages build, which reaches servers at home from the page itself. */
 const IS_WEB = import.meta.env.MODE === "web";
@@ -231,22 +234,36 @@ function Picker({
   );
 }
 
-/** Home rows with show/hide and move up/down. Rows come from the server, so they match what Home shows. */
+/**
+ * Home rows with show/hide and move up/down, plus the custom rows made here.
+ * Plex's rows come from the server, so they match what Home shows.
+ */
 function HomeRows({ prefs }: { prefs: Prefs }) {
   const [hubs, setHubs] = useState<Hub[] | null>(null);
+  const [sections, setSections] = useState<LibrarySection[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // The row being edited, or "new".
+  const [editing, setEditing] = useState<CustomRow | "new" | null>(null);
   useEffect(() => {
     library
       .homeHubs()
       .then(setHubs)
       .catch((e) => setError(errorMessage(e)));
+    api.librarySections().then(setSections, () => setSections([]));
   }, []);
 
   if (error) return <div className="text-destructive px-5 py-4 text-sm">Couldn't load the Home rows: {error}</div>;
   if (!hubs) return <Skeleton className="m-5 h-24" />;
 
-  const rows = arrangeHubs(hubs, prefs, true);
+  const custom: Hub[] = prefs.customRows.map((r) => ({
+    hubIdentifier: customHubId(r),
+    title: r.title,
+    type: "",
+    Metadata: [],
+  }));
+  const rows = arrangeHubs([...hubs, ...custom], prefs, true);
   const ids = rows.map((h) => h.hubIdentifier);
+  const customRow = (id: string) => prefs.customRows.find((r) => customHubId(r) === id);
 
   function move(i: number, by: -1 | 1) {
     const order = ids.slice();
@@ -260,19 +277,65 @@ function HomeRows({ prefs }: { prefs: Prefs }) {
     savePrefs({ hiddenHubs: hidden ? prefs.hiddenHubs.filter((h) => h !== id) : [...prefs.hiddenHubs, id] });
   }
 
+  function save(row: CustomRow) {
+    const exists = prefs.customRows.some((r) => r.id === row.id);
+    savePrefs({
+      customRows: exists ? prefs.customRows.map((r) => (r.id === row.id ? row : r)) : [...prefs.customRows, row],
+      // A new row goes last, even when the order was picked before.
+      hubOrder: exists || prefs.hubOrder.length === 0 ? prefs.hubOrder : [...ids, customHubId(row)],
+    });
+    setEditing(null);
+  }
+
+  function remove(row: CustomRow) {
+    const id = customHubId(row);
+    savePrefs({
+      customRows: prefs.customRows.filter((r) => r.id !== row.id),
+      hubOrder: prefs.hubOrder.filter((h) => h !== id),
+      hiddenHubs: prefs.hiddenHubs.filter((h) => h !== id),
+    });
+  }
+
+  const iconButton = "size-8";
   return (
     <>
       {rows.map((h, i) => {
         const hidden = prefs.hiddenHubs.includes(h.hubIdentifier);
+        const row = customRow(h.hubIdentifier);
         return (
           <div key={h.hubIdentifier} className="flex items-center gap-2 px-5 py-2.5">
             <span className={cn("flex-1 truncate text-sm", hidden && "text-muted-foreground line-through")}>
               {h.title}
+              {row && <span className="text-muted-foreground ml-2 text-xs">Custom</span>}
             </span>
+            {row && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={iconButton}
+                  onClick={() => setEditing(row)}
+                  aria-label="Edit row"
+                  title="Edit row"
+                >
+                  <Pencil />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={iconButton}
+                  onClick={() => remove(row)}
+                  aria-label="Delete row"
+                  title="Delete row"
+                >
+                  <Trash2 />
+                </Button>
+              </>
+            )}
             <Button
               variant="ghost"
               size="icon"
-              className="size-8"
+              className={iconButton}
               disabled={i === 0}
               onClick={() => move(i, -1)}
               aria-label="Move up"
@@ -282,7 +345,7 @@ function HomeRows({ prefs }: { prefs: Prefs }) {
             <Button
               variant="ghost"
               size="icon"
-              className="size-8"
+              className={iconButton}
               disabled={i === rows.length - 1}
               onClick={() => move(i, 1)}
               aria-label="Move down"
@@ -292,7 +355,7 @@ function HomeRows({ prefs }: { prefs: Prefs }) {
             <Button
               variant="ghost"
               size="icon"
-              className="size-8"
+              className={iconButton}
               onClick={() => toggle(h.hubIdentifier)}
               aria-label={hidden ? "Show row" : "Hide row"}
               title={hidden ? "Show row" : "Hide row"}
@@ -302,8 +365,12 @@ function HomeRows({ prefs }: { prefs: Prefs }) {
           </div>
         );
       })}
-      {(prefs.hubOrder.length > 0 || prefs.hiddenHubs.length > 0) && (
-        <div className="px-5 py-2.5">
+      <div className="flex items-center gap-2 px-5 py-2.5">
+        <Button variant="outline" size="sm" onClick={() => setEditing("new")} disabled={!sections.length}>
+          <Plus />
+          Add row
+        </Button>
+        {(prefs.hubOrder.length > 0 || prefs.hiddenHubs.length > 0) && (
           <Button
             variant="ghost"
             size="sm"
@@ -312,9 +379,162 @@ function HomeRows({ prefs }: { prefs: Prefs }) {
           >
             Reset to Plex's order
           </Button>
-        </div>
+        )}
+      </div>
+      {editing && (
+        <CustomRowDialog
+          row={editing === "new" ? null : editing}
+          sections={sections.filter((s) => s.type === "movie" || s.type === "show")}
+          onSave={save}
+          onClose={() => setEditing(null)}
+        />
       )}
     </>
+  );
+}
+
+/** Makes or edits a custom Home row: a library, a sort, and optionally a genre and unwatched only. */
+function CustomRowDialog({
+  row,
+  sections,
+  onSave,
+  onClose,
+}: {
+  row: CustomRow | null;
+  sections: LibrarySection[];
+  onSave: (row: CustomRow) => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState(row?.title ?? "");
+  const [section, setSection] = useState(row?.section ?? sections[0]?.key ?? "");
+  const [sortKey, setSortKey] = useState(row?.sort.split(":")[0] ?? "audienceRating");
+  const [desc, setDesc] = useState(row ? row.sort.endsWith(":desc") : true);
+  const [genre, setGenre] = useState(row?.filters.genre ?? "");
+  const [unwatched, setUnwatched] = useState(row?.filters.unwatched ?? false);
+  const [genres, setGenres] = useState<FilterValue[]>([]);
+
+  const kind = sections.find((s) => s.key === section)?.type;
+  const sorts = SORTS.filter((s) => !s.only || s.only === kind);
+  const sort = sorts.find((s) => s.key === sortKey) ?? sorts[0];
+
+  useEffect(() => {
+    if (!section) return;
+    library.filterValues(section, "genre").then(setGenres, () => setGenres([]));
+  }, [section]);
+
+  function pickSection(key: string) {
+    if (key === section) return;
+    setSection(key);
+    // Genres are numbered per library.
+    setGenre("");
+  }
+
+  function pickSort(key: string) {
+    setSortKey(key);
+    setDesc(SORTS.find((s) => s.key === key)?.desc ?? true);
+  }
+
+  function applyPreset(p: Omit<CustomRow, "id">) {
+    setTitle(p.title);
+    setSection(p.section);
+    const [key, dir] = p.sort.split(":");
+    setSortKey(key);
+    setDesc(dir === "desc");
+    setGenre(p.filters.genre ?? "");
+    setUnwatched(p.filters.unwatched ?? false);
+  }
+
+  function save() {
+    const lib = sections.find((s) => s.key === section);
+    onSave({
+      id: row?.id ?? newRowId(),
+      title: title.trim() || `${sort.label} in ${lib?.title ?? "library"}`,
+      section,
+      sort: sort.key === "random" ? "random" : `${sort.key}${desc ? ":desc" : ""}`,
+      filters: { genre: genre || null, unwatched },
+    });
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="gap-5 p-6">
+        <div>
+          <DialogTitle>{row ? "Edit row" : "Add a Home row"}</DialogTitle>
+          <DialogDescription>Shows the first 20 of a library, in the order you pick.</DialogDescription>
+        </div>
+        {!row && (
+          <div className="flex flex-wrap gap-2">
+            {presets(sections).map((p) => (
+              <Button key={p.title} variant="secondary" size="sm" onClick={() => applyPreset(p)}>
+                {p.title}
+              </Button>
+            ))}
+          </div>
+        )}
+        <div className="bg-card divide-y rounded-xl border">
+          <Row label="Name">
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={`${sort.label} in ${sections.find((s) => s.key === section)?.title ?? "library"}`}
+              className={cn(inputClass, "w-56")}
+            />
+          </Row>
+          <Row label="Library">
+            <Picker
+              value={section}
+              options={sections.map((s) => ({ value: s.key, label: s.title }))}
+              onChange={pickSection}
+            />
+          </Row>
+          <Row label="Sort by">
+            <div className="flex items-center gap-2">
+              <Picker
+                value={sort.key}
+                options={sorts.map((s) => ({ value: s.key, label: s.label }))}
+                onChange={pickSort}
+              />
+              {sort.key !== "random" && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setDesc(!desc)}
+                  aria-label={desc ? "Descending" : "Ascending"}
+                  title={desc ? "Descending" : "Ascending"}
+                >
+                  {desc ? <ArrowDown /> : <ArrowUp />}
+                </Button>
+              )}
+            </div>
+          </Row>
+          <Row label="Genre">
+            <Picker
+              value={genre}
+              options={[{ value: "", label: "Any genre" }, ...genres.map((g) => ({ value: g.key, label: g.title }))]}
+              onChange={setGenre}
+            />
+          </Row>
+          <Row label="Unwatched only">
+            <Segmented
+              value={unwatched ? "on" : "off"}
+              options={[
+                { value: "on", label: "On" },
+                { value: "off", label: "Off" },
+              ]}
+              onChange={(v) => setUnwatched(v === "on")}
+            />
+          </Row>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={!section}>
+            {row ? "Save" : "Add row"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

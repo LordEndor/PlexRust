@@ -1,11 +1,12 @@
 import { createContext, useContext } from "react";
 
-import type { LibrarySection, ServerConnection } from "@/lib/api";
+import type { Filters, LibrarySection, ServerConnection } from "@/lib/api";
 import type { DiscoverRowKey, MediaType } from "@/lib/seerr";
 
 export type Route =
   | { name: "home" }
-  | { name: "library"; section: LibrarySection }
+  /** `sort` and `filters` open the library already sorted and narrowed down, as a custom Home row is. */
+  | { name: "library"; section: LibrarySection; sort?: string; filters?: Filters }
   | { name: "item"; ratingKey: string }
   | { name: "search"; query: string }
   | { name: "settings" }
@@ -39,7 +40,9 @@ export function routeKey(r: Route) {
     case "home":
       return "home";
     case "library":
-      return `library:${r.section.key}`;
+      return r.sort
+        ? `library:${r.section.key}:${r.sort}:${JSON.stringify(r.filters ?? {})}`
+        : `library:${r.section.key}`;
     case "item":
       return `item:${r.ratingKey}`;
     case "search":

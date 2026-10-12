@@ -295,7 +295,7 @@ function Screen({ route }: { route: Route }) {
     case "home":
       return <HomeView />;
     case "library":
-      return <LibraryView section={route.section} />;
+      return <LibraryView section={route.section} sort={route.sort} filters={route.filters} />;
     case "item":
       return <ItemView ratingKey={route.ratingKey} />;
     case "search":

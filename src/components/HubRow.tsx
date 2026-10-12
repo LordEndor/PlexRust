@@ -11,7 +11,8 @@ function isWide(hub: Hub) {
   return /continue|ondeck|inprogress/i.test(hub.hubIdentifier);
 }
 
-export function HubRow({ hub }: { hub: Hub }) {
+/** `onShowAll` makes the title open everything the row is a sample of. */
+export function HubRow({ hub, onShowAll }: { hub: Hub; onShowAll?: () => void }) {
   const scroller = useRef<HTMLDivElement>(null);
   const wide = isWide(hub);
   const size = posterSize(usePrefs());
@@ -24,7 +25,16 @@ export function HubRow({ hub }: { hub: Hub }) {
   return (
     <section className="group/row">
       <div className="mb-3 flex items-center gap-2">
-        <h2 className="flex-1 text-lg font-semibold">{hub.title}</h2>
+        <h2 className="flex-1 text-lg font-semibold">
+          {onShowAll ? (
+            <button onClick={onShowAll} className="group/title inline-flex items-center gap-1 hover:underline">
+              {hub.title}
+              <ChevronRight className="text-muted-foreground size-5 transition-transform group-hover/title:translate-x-0.5" />
+            </button>
+          ) : (
+            hub.title
+          )}
+        </h2>
         <div className="flex gap-1 opacity-0 transition-opacity group-hover/row:opacity-100">
           <Button variant="ghost" size="icon" className="size-8" onClick={() => scroll(-1)}>
             <ChevronLeft />
