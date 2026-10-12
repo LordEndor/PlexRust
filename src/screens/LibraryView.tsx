@@ -276,7 +276,6 @@ function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React
           {count && <span className="text-muted-foreground ml-3 text-sm font-normal">{count}</span>}
         </h1>
         {toggle}
-        <SortMenu sort={sort} kind={section.type} onChange={setSort} />
       </header>
 
       <div className="-mt-2 mb-5 flex flex-wrap items-center gap-2">
@@ -311,6 +310,9 @@ function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React
             <X /> Clear
           </Button>
         )}
+        <div className="ml-auto">
+          <SortMenu sort={sort} kind={section.type} onChange={setSort} />
+        </div>
       </div>
 
       {total === 0 && !error && (
