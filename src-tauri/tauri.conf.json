@@ -40,6 +40,11 @@
       "icons/icon.ico"
     ],
     "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    },
     "resources": {
       "mpv/": "mpv/"
     }
