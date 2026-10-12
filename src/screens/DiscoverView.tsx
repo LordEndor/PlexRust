@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage } from "@/lib/api";
 import { useNav } from "@/lib/nav";
 import { posterSize, usePrefs } from "@/lib/prefs";
-import { DISCOVER_ROWS, seerr, type SeerrResult } from "@/lib/seerr";
+import { DISCOVER_ROWS, seerr, type DiscoverRowKey, type SeerrResult } from "@/lib/seerr";
 
 /** Seerr's catalogue: search anything on TMDB, or browse what's popular, and request what's missing. */
 export function DiscoverView({ query: initial }: { query?: string }) {
@@ -94,7 +94,8 @@ function SearchResults({ query }: { query: string }) {
   );
 }
 
-function DiscoverRow({ row, title }: { row: string; title: string }) {
+function DiscoverRow({ row, title }: { row: DiscoverRowKey; title: string }) {
+  const { navigate } = useNav();
   const [items, setItems] = useState<SeerrResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -129,8 +130,16 @@ function DiscoverRow({ row, title }: { row: string; title: string }) {
   return (
     <section className="group/row">
       <div className="mb-3 flex items-center gap-2">
-        <h2 className="flex-1 text-lg font-semibold">{title}</h2>
-        <div className="flex gap-1 opacity-0 transition-opacity group-hover/row:opacity-100">
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-foreground h-7 gap-0.5 px-2"
+          onClick={() => navigate({ name: "discoverAll", row })}
+        >
+          Show all <ChevronRight />
+        </Button>
+        <div className="ml-auto flex gap-1 opacity-0 transition-opacity group-hover/row:opacity-100">
           <Button variant="ghost" size="icon" className="size-8" onClick={() => scroll(-1)}>
             <ChevronLeft />
           </Button>

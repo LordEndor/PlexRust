@@ -29,6 +29,7 @@ import { useSeerrEnabled } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
 import { CalendarView } from "@/screens/CalendarView";
 import { HomeView } from "@/screens/HomeView";
+import { DiscoverAllView } from "@/screens/DiscoverAllView";
 import { DiscoverView } from "@/screens/DiscoverView";
 import { ItemView } from "@/screens/ItemView";
 import { LibraryView } from "@/screens/LibraryView";
@@ -303,6 +304,8 @@ function Screen({ route }: { route: Route }) {
       return <SettingsView />;
     case "discover":
       return <DiscoverView query={route.query} />;
+    case "discoverAll":
+      return <DiscoverAllView row={route.row} />;
     case "request":
       return <RequestView mediaType={route.mediaType} tmdbId={route.tmdbId} />;
     case "requests":

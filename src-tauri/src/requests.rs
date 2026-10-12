@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use seerr::{Auth, Info, MediaType, NewRequest, SeerrClient};
+use seerr::{Auth, Browse, Info, MediaType, NewRequest, SeerrClient};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::State;
@@ -133,6 +133,27 @@ pub async fn seerr_discover(
 ) -> CmdResult<Value> {
     let c = connection(&state, &seerr).await?;
     c.client.discover(&row, page.unwrap_or(1)).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn seerr_browse(
+    state: State<'_, AppState>,
+    seerr: State<'_, SeerrState>,
+    media_type: MediaType,
+    page: Option<u32>,
+    browse: Option<Browse>,
+) -> CmdResult<Value> {
+    let c = connection(&state, &seerr).await?;
+    c.client
+        .browse(media_type, page.unwrap_or(1), &browse.unwrap_or_default())
+        .await
+        .map_err(err)
+}
+
+#[tauri::command]
+pub async fn seerr_genres(state: State<'_, AppState>, seerr: State<'_, SeerrState>, media_type: MediaType) -> CmdResult<Value> {
+    let c = connection(&state, &seerr).await?;
+    c.client.genres(media_type).await.map_err(err)
 }
 
 #[tauri::command]

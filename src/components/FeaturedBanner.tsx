@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Info, Play } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { imageUrl, type Hub, type Metadata } from "@/lib/api";
+import { imageUrl, library, type Hub, type Metadata } from "@/lib/api";
 import { progress, subtitle } from "@/lib/format";
 import { useNav } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -10,14 +10,40 @@ import { cn } from "@/lib/utils";
 const ROTATE_MS = 9000;
 const MAX = 6;
 
-/** Recently added movies and shows with artwork, for the banner. */
-export function featuredItems(hubs: Hub[]): Metadata[] {
-  const seen = new Set<string>();
-  return hubs
-    .filter((h) => /recentlyadded/i.test(h.hubIdentifier))
+/** Home's Recently Added rows: `home.movies.recent`, `home.television.recent`, or a library's `movie.recentlyadded`. */
+function isRecentlyAdded(hub: Hub) {
+  return /(\.recent|recentlyadded)$/i.test(hub.hubIdentifier);
+}
+
+/** The show an episode or season belongs to. */
+function showKey(m: Metadata) {
+  if (m.type === "episode") return m.grandparentRatingKey;
+  if (m.type === "season") return m.parentRatingKey;
+  return m.type === "show" ? m.ratingKey : null;
+}
+
+/**
+ * Recently added movies and shows with artwork, for the banner. Home's TV row
+ * lists new episodes or seasons, so those are swapped for their show.
+ */
+export async function featuredItems(hubs: Hub[]): Promise<Metadata[]> {
+  const recent = hubs
+    .filter(isRecentlyAdded)
     .flatMap((h) => h.Metadata)
-    .filter((m) => (m.type === "movie" || m.type === "show") && m.art && !seen.has(m.ratingKey) && seen.add(m.ratingKey))
-    .slice(0, MAX);
+    .sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
+  const seen = new Set<string>();
+  const picks: (Metadata | string)[] = [];
+  for (const m of recent) {
+    const key = m.type === "movie" ? m.ratingKey : showKey(m);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    picks.push(m.type === "movie" || m.type === "show" ? m : key);
+    if (picks.length === MAX * 2) break;
+  }
+  const items = await Promise.all(
+    picks.map((p) => (typeof p === "string" ? library.metadata(p).catch(() => null) : p)),
+  );
+  return items.filter((m): m is Metadata => !!m?.art).slice(0, MAX);
 }
 
 /** Big artwork at the top of Home, cycling through a few recent additions. */
@@ -32,7 +58,7 @@ export function FeaturedBanner({ items }: { items: Metadata[] }) {
     return () => window.clearTimeout(t);
   }, [index, paused, items.length]);
 
-  const item = items[index];
+  const item = items[index] ?? items[0];
   if (!item) return null;
   const resumable = progress(item) > 0;
 

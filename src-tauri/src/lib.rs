@@ -92,6 +92,8 @@ pub fn run() {
             requests::seerr_info,
             requests::seerr_search,
             requests::seerr_discover,
+            requests::seerr_browse,
+            requests::seerr_genres,
             requests::seerr_details,
             requests::seerr_quota,
             requests::seerr_request,
