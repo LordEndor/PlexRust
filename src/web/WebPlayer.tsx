@@ -46,6 +46,10 @@ const REPORT_EVERY_MS = 10_000;
 const UP_NEXT_SECS = 10;
 const HIDE_CONTROLS_MS = 3000;
 
+// Leaving fullscreen waits a tick after the player closes, so the next
+// episode (a fresh Player mounted in the same render) can cancel it.
+let exitFullscreenTimer: number | undefined;
+
 interface WebQuality {
   /** Matches the label saved in prefs. */
   label: string;
@@ -255,7 +259,6 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       report("stopped");
       stopStream();
       document.documentElement.classList.remove("playing");
-      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     };
   }, [ratingKey, resume, report, startStream, stopStream, playlist]);
 
@@ -269,10 +272,18 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     return () => window.clearInterval(t);
   }, [paused, report]);
 
+  // Stay fullscreen from one episode to the next; leave it only when playback ends.
   useEffect(() => {
+    window.clearTimeout(exitFullscreenTimer);
     const onChange = () => setFullscreen(!!document.fullscreenElement);
+    onChange();
     document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      exitFullscreenTimer = window.setTimeout(() => {
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      });
+    };
   }, []);
 
   const togglePause = useCallback(() => {
