@@ -6,6 +6,9 @@ export type SkipMode = "auto" | "button" | "off";
 export interface Prefs {
   skipIntro: SkipMode;
   skipCredits: SkipMode;
+  /** Recaps and outros are found by chapter name; Plex doesn't detect them. */
+  skipRecap: SkipMode;
+  skipOutro: SkipMode;
   /** A label from QUALITIES. */
   quality: string;
   /** mpv language list such as "sv,swe"; empty keeps the file's default. */
@@ -29,6 +32,8 @@ export interface Prefs {
 export const DEFAULT_PREFS: Prefs = {
   skipIntro: "auto",
   skipCredits: "auto",
+  skipRecap: "auto",
+  skipOutro: "auto",
   quality: "Original",
   audioLanguage: "",
   subtitleLanguage: "",

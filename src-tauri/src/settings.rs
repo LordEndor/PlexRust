@@ -61,6 +61,10 @@ pub struct Prefs {
     pub skip_intro: String,
     /// "auto", "button" or "off". Ending credits lead to the next episode.
     pub skip_credits: String,
+    /// "auto", "button" or "off". Found from chapter names such as "Recap".
+    pub skip_recap: String,
+    /// "auto", "button" or "off". Found from chapter names such as "Outro" or "ED".
+    pub skip_outro: String,
     /// A quality label from the player's list; "Original" plays the file.
     pub quality: String,
     /// mpv language list such as "sv,swe"; empty keeps the file's default.
@@ -86,6 +90,8 @@ impl Default for Prefs {
         Self {
             skip_intro: "auto".into(),
             skip_credits: "auto".into(),
+            skip_recap: "auto".into(),
+            skip_outro: "auto".into(),
             quality: "Original".into(),
             audio_language: String::new(),
             subtitle_language: String::new(),

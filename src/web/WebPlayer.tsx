@@ -3,13 +3,12 @@
  * vite.config.ts). It plays Plex's HLS transcode in a <video> element through
  * hls.js and keeps the desktop player's skip intro/credits and Up Next rules.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Hls from "hls.js";
 import {
   ArrowLeft,
   AudioLines,
-  ChevronsRight,
   Captions,
   Gauge,
   Loader2,
@@ -25,6 +24,7 @@ import {
   VolumeX,
 } from "lucide-react";
 
+import { SkipButton } from "@/components/SkipButton";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -38,6 +38,7 @@ import { errorMessage, imageUrl } from "@/lib/api";
 import { useNav } from "@/lib/nav";
 import { loadPrefs, usePrefs, type Prefs } from "@/lib/prefs";
 import { formatTime, playback, QUALITIES, type PlaybackState } from "@/lib/player";
+import { skipSegments, useSkips } from "@/lib/skips";
 import { cn } from "@/lib/utils";
 import { getPlaybackInfo, selectStreams, timelineUrl, transcodeUrl, type RawStream, type WebPlaybackInfo } from "@/web/plex";
 
@@ -108,8 +109,6 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const [subId, setSubId] = useState(0);
   const [controls, setControls] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
-  const [skip, setSkip] = useState<{ label: string; to: number } | null>(null);
-  const [upNext, setUpNext] = useState<{ countdown: number | null } | null>(null);
 
   const video = useRef<HTMLVideoElement>(null);
   const hls = useRef<Hls | null>(null);
@@ -121,8 +120,24 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const clickTimer = useRef<number | undefined>(undefined);
   const close = useRef(onClose);
   close.current = onClose;
-  const handledMarkers = useRef(new Set<number>());
   const finished = useRef(false);
+
+  const segments = useMemo(
+    () =>
+      skipSegments(
+        info?.markers ?? [],
+        (info?.chapters ?? []).map((c, i) => ({ title: c.tag || `Chapter ${(c.index ?? i) + 1}`, start: c.startTimeOffset / 1000 })),
+        duration,
+      ),
+    [info, duration],
+  );
+  const { skip, skipped, upNext, setUpNext } = useSkips({
+    segments,
+    time,
+    prefs,
+    ready: !!info && !buffering,
+    upNextSecs: UP_NEXT_SECS,
+  });
 
   const flash = useCallback((text: string, ms = 3000) => {
     setNotice(text);
@@ -281,39 +296,6 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     video.current.volume = Math.max(0, Math.min(1, v));
     video.current.muted = false;
   }, []);
-
-  // Intro and credits markers: skip them, offer a button, or bring up Up Next.
-  useEffect(() => {
-    if (!info || !prefs || buffering) return;
-    const ms = time * 1000;
-    const i = info.markers.findIndex((m) => ms >= m.startTimeOffset && ms < m.endTimeOffset - 1000);
-    const m = info.markers[i];
-    const ending =
-      m?.type === "credits" && (!!m.final || m.endTimeOffset >= info.durationMs - 5000) && prefs.skipCredits !== "off";
-
-    if (ending) {
-      setSkip(null);
-      if (!handledMarkers.current.has(i)) {
-        handledMarkers.current.add(i);
-        setUpNext({ countdown: prefs.skipCredits === "auto" ? UP_NEXT_SECS : null });
-      }
-      return;
-    }
-    setUpNext(null);
-
-    const mode = m?.type === "intro" ? prefs.skipIntro : m?.type === "credits" ? prefs.skipCredits : "off";
-    const label = m?.type === "intro" ? "Skip intro" : "Skip credits";
-    if (mode === "auto" && !handledMarkers.current.has(i)) {
-      handledMarkers.current.add(i);
-      seekTo(m.endTimeOffset / 1000);
-      flash(m.type === "intro" ? "Skipped the intro" : "Skipped the credits");
-      setSkip(null);
-    } else if (mode !== "off") {
-      setSkip({ label, to: m.endTimeOffset / 1000 });
-    } else {
-      setSkip(null);
-    }
-  }, [time, info, prefs, buffering, seekTo, flash]);
 
   useEffect(() => {
     if (upNext?.countdown == null || paused) return;
@@ -474,19 +456,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       )}
 
       {skip && !upNext && !error && (
-        <Button
-          size="lg"
-          onClick={() => {
+        <SkipButton
+          skip={skip}
+          paused={paused}
+          raised={controls}
+          onSkip={() => {
             seekTo(skip.to);
-            setSkip(null);
+            skipped(skip.id);
           }}
-          className={cn(
-            "absolute right-8 z-10 bg-white text-black shadow-lg transition-[bottom] duration-300 hover:bg-white/90",
-            controls ? "bottom-36" : "bottom-10",
-          )}
-        >
-          <ChevronsRight /> {skip.label}
-        </Button>
+        />
       )}
 
       {upNext && info && !error && (

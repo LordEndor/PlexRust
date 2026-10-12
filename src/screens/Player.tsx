@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -14,7 +14,6 @@ import {
   ArrowLeft,
   AudioLines,
   Check,
-  ChevronsRight,
   Captions,
   Gauge,
   ListOrdered,
@@ -42,6 +41,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { errorMessage, imageUrl } from "@/lib/api";
+import { SkipButton } from "@/components/SkipButton";
+import { skipSegments, useSkips } from "@/lib/skips";
 import { useNav } from "@/lib/nav";
 import { loadPrefs, usePrefs } from "@/lib/prefs";
 import {
@@ -159,10 +160,6 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const [quality, setQuality] = useState<Quality>(QUALITIES[0]);
   const [controls, setControls] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
-  // The skip button for the intro or credits marker being played.
-  const [skip, setSkip] = useState<{ label: string; to: number } | null>(null);
-  // Shown once the ending credits start; countdown is null when waiting for a click.
-  const [upNext, setUpNext] = useState<{ countdown: number | null } | null>(null);
   const [previews, setPreviews] = useState<Previews | null>(null);
   // Chapters mpv found in the file, used when Plex has none.
   const [fileChapters, setFileChapters] = useState<Chapter[]>([]);
@@ -176,20 +173,31 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const clickTimer = useRef<number | undefined>(undefined);
   const close = useRef(onClose);
   close.current = onClose;
-  // Markers already auto-skipped or dismissed, by index.
-  const handledMarkers = useRef(new Set<number>());
   const finished = useRef(false);
   // The audio and subtitle pick to restore, and whether it has been applied to
   // the file loaded now. Reset per load since track ids change on reload.
   const choice = useRef<TrackChoice | null>(null);
   const applied = useRef({ audio: false, sub: false });
-  const flash = useCallback((text: string, ms = 3000) => {
-    setNotice(text);
-    window.setTimeout(() => setNotice((n) => (n === text ? null : n)), ms);
-  }, []);
 
   // Done with this item: on to the next episode, or back out of the player.
   // Either way it's reported as watched to the end.
+  const total = duration || (info?.durationMs ?? 0) / 1000;
+  const chapters: Chapter[] = useMemo(
+    () =>
+      info?.chapters.length
+        ? info.chapters.map((c, i) => ({ title: c.tag || `Chapter ${(c.index ?? i) + 1}`, start: c.startTimeOffset / 1000 }))
+        : fileChapters,
+    [info, fileChapters],
+  );
+  const segments = useMemo(() => skipSegments(info?.markers ?? [], chapters, total), [info, chapters, total]);
+  const { skip, skipped, upNext, setUpNext } = useSkips({
+    segments,
+    time,
+    prefs,
+    ready: !!info && !buffering,
+    upNextSecs: UP_NEXT_SECS,
+  });
+
   const finish = useCallback(() => {
     finished.current = true;
     const next = live.current.info?.next;
@@ -403,39 +411,6 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const seekBy = useCallback((secs: number) => command("seek", [secs, "relative", "exact"]).catch(() => {}), []);
   const seekTo = useCallback((secs: number) => command("seek", [secs, "absolute", "exact"]).catch(() => {}), []);
 
-  // Intro and credits markers: skip them, offer a button, or bring up Up Next.
-  useEffect(() => {
-    if (!info || !prefs || buffering) return;
-    const ms = time * 1000;
-    const i = info.markers.findIndex((m) => ms >= m.startTimeOffset && ms < m.endTimeOffset - 1000);
-    const m = info.markers[i];
-    const ending =
-      m?.type === "credits" && (!!m.final || m.endTimeOffset >= info.durationMs - 5000) && prefs.skipCredits !== "off";
-
-    if (ending) {
-      setSkip(null);
-      if (!handledMarkers.current.has(i)) {
-        handledMarkers.current.add(i);
-        setUpNext({ countdown: prefs.skipCredits === "auto" ? UP_NEXT_SECS : null });
-      }
-      return;
-    }
-    setUpNext(null);
-
-    const mode = m?.type === "intro" ? prefs.skipIntro : m?.type === "credits" ? prefs.skipCredits : "off";
-    const label = m?.type === "intro" ? "Skip intro" : "Skip credits";
-    if (mode === "auto" && !handledMarkers.current.has(i)) {
-      handledMarkers.current.add(i);
-      seekTo(m.endTimeOffset / 1000);
-      flash(m.type === "intro" ? "Skipped the intro" : "Skipped the credits");
-      setSkip(null);
-    } else if (mode !== "off") {
-      setSkip({ label, to: m.endTimeOffset / 1000 });
-    } else {
-      setSkip(null);
-    }
-  }, [time, info, prefs, buffering, seekTo, flash]);
-
   // Up Next counts down while playing, then moves on.
   useEffect(() => {
     if (upNext?.countdown == null || paused) return;
@@ -537,12 +512,8 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
 
   const audio = tracks.filter((t) => t.type === "audio");
   const subs = tracks.filter((t) => t.type === "sub");
-  const total = duration || (info?.durationMs ?? 0) / 1000;
   // Episodes get previous and next buttons, even at either end of the show.
   const episodes = !!(info?.previous || info?.queue.length);
-  const chapters: Chapter[] = info?.chapters.length
-    ? info.chapters.map((c, i) => ({ title: c.tag || `Chapter ${(c.index ?? i) + 1}`, start: c.startTimeOffset / 1000 }))
-    : fileChapters;
 
   // A pick from the menus becomes the remembered one for this show.
   const pickTrack = (type: "audio" | "sub", id: number | undefined) => {
@@ -601,19 +572,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       )}
 
       {skip && !upNext && !error && (
-        <Button
-          size="lg"
-          onClick={() => {
+        <SkipButton
+          skip={skip}
+          paused={paused}
+          raised={controls}
+          onSkip={() => {
             seekTo(skip.to);
-            setSkip(null);
+            skipped(skip.id);
           }}
-          className={cn(
-            "absolute right-8 z-10 bg-white text-black shadow-lg transition-[bottom] duration-300 hover:bg-white/90",
-            controls ? "bottom-36" : "bottom-10",
-          )}
-        >
-          <ChevronsRight /> {skip.label}
-        </Button>
+        />
       )}
 
       {upNext && info && !error && (

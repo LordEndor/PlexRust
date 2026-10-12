@@ -19,7 +19,7 @@ import type {
   Session,
   User,
 } from "@/lib/api";
-import type { Episode, Marker, PlaybackInfo } from "@/lib/player";
+import type { Chapter, Episode, Marker, PlaybackInfo } from "@/lib/player";
 import { DEFAULT_PREFS, type Prefs } from "@/lib/prefs";
 
 const PLEX_TV = "https://plex.tv";
@@ -227,6 +227,7 @@ interface Container {
 /** Fields the UI types don't carry but playback needs. */
 interface RawExtras {
   Marker?: Marker[];
+  Chapter?: Chapter[];
   Media: (Omit<Metadata["Media"][number], "Part"> & { Part?: RawPart[] })[];
 }
 
@@ -262,7 +263,7 @@ function hubs(c: Container): Hub[] {
 }
 
 async function metadataRaw(ratingKey: string) {
-  const c = await container(`/library/metadata/${ratingKey}`, { includeMarkers: 1, includeGuids: 1 });
+  const c = await container(`/library/metadata/${ratingKey}`, { includeMarkers: 1, includeChapters: 1, includeGuids: 1 });
   const item = c.Metadata?.[0];
   if (!item) throw new Error("That item no longer exists on the server");
   return item;
@@ -473,9 +474,9 @@ async function playbackInfo(ratingKey: string, playlist?: string | null): Promis
     next: queue[0] ?? null,
     previous: around.previous ? episode(around.previous) : null,
     queue,
-    // Seek previews, chapters and remembered tracks are desktop-only for now.
+    // Seek previews and remembered tracks are desktop-only for now.
     hasPreviews: false,
-    chapters: [],
+    chapters: item.Chapter ?? [],
     trackKey: m.grandparentRatingKey ?? m.ratingKey,
     rememberedTracks: null,
     partId: part.id,
