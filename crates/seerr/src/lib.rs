@@ -113,6 +113,63 @@ pub const DISCOVER_ROWS: &[(&str, &str)] = &[
     ("upcomingTv", "/discover/tv/upcoming"),
 ];
 
+/// How a full category page is narrowed and ordered. Each field is one of
+/// the query parameters Seerr's own filter panel sends to `/discover/movies`
+/// and `/discover/tv`; unset fields are left out.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Browse {
+    /// TMDB's sort, like `popularity.desc` or `vote_average.desc`.
+    #[serde(default)]
+    pub sort_by: Option<String>,
+    /// A TMDB genre id.
+    #[serde(default)]
+    pub genre: Option<u64>,
+    /// Released (or first aired) on or after this day, `YYYY-MM-DD`.
+    #[serde(default)]
+    pub date_from: Option<String>,
+    /// Released (or first aired) on or before this day.
+    #[serde(default)]
+    pub date_to: Option<String>,
+    /// Lowest TMDB user score, 0 to 10.
+    #[serde(default)]
+    pub min_rating: Option<f32>,
+    /// Fewest TMDB votes, so a sort by score isn't topped by titles three
+    /// people rated.
+    #[serde(default)]
+    pub min_votes: Option<u32>,
+}
+
+impl Browse {
+    fn query(&self, media_type: MediaType, page: u32) -> Vec<(&'static str, String)> {
+        let (from, to) = match media_type {
+            MediaType::Movie => ("primaryReleaseDateGte", "primaryReleaseDateLte"),
+            MediaType::Tv => ("firstAirDateGte", "firstAirDateLte"),
+        };
+        let mut q = vec![("page", page.to_string())];
+        let nonempty = |s: &Option<String>| s.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+        if let Some(v) = nonempty(&self.sort_by) {
+            q.push(("sortBy", v));
+        }
+        if let Some(v) = self.genre {
+            q.push(("genre", v.to_string()));
+        }
+        if let Some(v) = nonempty(&self.date_from) {
+            q.push((from, v));
+        }
+        if let Some(v) = nonempty(&self.date_to) {
+            q.push((to, v));
+        }
+        if let Some(v) = self.min_rating.filter(|v| *v > 0.0) {
+            q.push(("voteAverageGte", v.to_string()));
+        }
+        if let Some(v) = self.min_votes.filter(|v| *v > 0) {
+            q.push(("voteCountGte", v.to_string()));
+        }
+        q
+    }
+}
+
 pub struct SeerrClient {
     http: reqwest::Client,
     /// Ends in `/api/v1`.
@@ -166,6 +223,21 @@ impl SeerrClient {
                 message: format!("unknown discover row {row}"),
             })?;
         self.get(path, &[("page", page.to_string())]).await
+    }
+
+    /// One page of every movie or show on TMDB, sorted and filtered the way
+    /// Seerr's full Movies and Series pages do it.
+    pub async fn browse(&self, media_type: MediaType, page: u32, browse: &Browse) -> Result<Value> {
+        let path = match media_type {
+            MediaType::Movie => "/discover/movies",
+            MediaType::Tv => "/discover/tv",
+        };
+        self.get(path, &browse.query(media_type, page)).await
+    }
+
+    /// TMDB's movie or show genres, as `[{ id, name }]`.
+    pub async fn genres(&self, media_type: MediaType) -> Result<Value> {
+        self.get(&format!("/genres/{}", media_type.as_str()), &[]).await
     }
 
     /// Movie or show details, including `mediaInfo` with what's available
@@ -437,6 +509,28 @@ mod tests {
         assert_eq!(show["title"], "Severance");
         assert_eq!(show["year"], "2022");
         assert!(show["posterPath"].is_null());
+    }
+
+    #[test]
+    fn builds_browse_queries() {
+        let b: Browse = serde_json::from_value(serde_json::json!({
+            "sortBy": "vote_average.desc", "genre": 18, "dateFrom": "2010-01-01", "dateTo": "", "minRating": 7.5, "minVotes": 200
+        }))
+        .unwrap();
+        assert_eq!(
+            b.query(MediaType::Movie, 2),
+            vec![
+                ("page", "2".to_owned()),
+                ("sortBy", "vote_average.desc".to_owned()),
+                ("genre", "18".to_owned()),
+                ("primaryReleaseDateGte", "2010-01-01".to_owned()),
+                ("voteAverageGte", "7.5".to_owned()),
+                ("voteCountGte", "200".to_owned()),
+            ]
+        );
+        let tv = Browse { date_to: Some("2019-12-31".into()), ..Default::default() };
+        assert_eq!(tv.query(MediaType::Tv, 1), vec![("page", "1".to_owned()), ("firstAirDateLte", "2019-12-31".to_owned())]);
+        assert_eq!(Browse::default().query(MediaType::Movie, 1), vec![("page", "1".to_owned())]);
     }
 
     #[test]

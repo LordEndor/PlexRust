@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 
 import type { LibrarySection, ServerConnection } from "@/lib/api";
-import type { MediaType } from "@/lib/seerr";
+import type { DiscoverRowKey, MediaType } from "@/lib/seerr";
 
 export type Route =
   | { name: "home" }
@@ -10,6 +10,8 @@ export type Route =
   | { name: "search"; query: string }
   | { name: "settings" }
   | { name: "discover"; query?: string }
+  /** A Discover row's Show all page. */
+  | { name: "discoverAll"; row: DiscoverRowKey }
   | { name: "request"; mediaType: MediaType; tmdbId: number }
   | { name: "requests" }
   | { name: "calendar" }
@@ -46,6 +48,8 @@ export function routeKey(r: Route) {
       return "settings";
     case "discover":
       return `discover:${r.query ?? ""}`;
+    case "discoverAll":
+      return `discover-all:${r.row}`;
     case "request":
       return `request:${r.mediaType}:${r.tmdbId}`;
     case "requests":
