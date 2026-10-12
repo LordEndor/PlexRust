@@ -108,3 +108,13 @@
     display: none;
   }
 }
+
+/* The automatic skip button filling up before it skips. */
+@keyframes skip-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}

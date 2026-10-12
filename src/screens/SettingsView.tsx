@@ -51,7 +51,13 @@ export function SettingsView() {
           <Skeleton className="h-64" />
         ) : (
           <>
-            <Section title="Intros and credits" description="Uses the intro and credits markers Plex detects for each file.">
+            <Section
+              title="Skipping"
+              description="Intros and credits use the markers Plex detects. Recaps, outros and unmarked intros are found by chapter name, such as Recap, Opening or ED. Automatically fills the skip button for 5 seconds first, so you can see it coming."
+            >
+              <Row label="Skip recaps" hint={'The "Previously on" part at the start of an episode.'}>
+                <Segmented value={prefs.skipRecap} options={SKIP_OPTIONS} onChange={(v) => savePrefs({ skipRecap: v })} />
+              </Row>
               <Row label="Skip intros" hint="Automatically jumps past the intro. Show button lets you choose each time.">
                 <Segmented value={prefs.skipIntro} options={SKIP_OPTIONS} onChange={(v) => savePrefs({ skipIntro: v })} />
               </Row>
@@ -60,6 +66,9 @@ export function SettingsView() {
                 hint="When the ending credits start, episodes move on to the next one and movies finish. Automatically gives you 10 seconds to cancel."
               >
                 <Segmented value={prefs.skipCredits} options={SKIP_OPTIONS} onChange={(v) => savePrefs({ skipCredits: v })} />
+              </Row>
+              <Row label="Skip outros" hint="The ending song. At the end of an episode it brings up Up Next, like the credits.">
+                <Segmented value={prefs.skipOutro} options={SKIP_OPTIONS} onChange={(v) => savePrefs({ skipOutro: v })} />
               </Row>
             </Section>
 
