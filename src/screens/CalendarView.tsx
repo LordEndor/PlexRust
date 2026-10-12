@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Film, Search, Tv } from "lucide-react";
+import { CalendarDays, Check, Clapperboard, ChevronLeft, ChevronRight, Film, Search, Tv } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -27,6 +27,15 @@ type Filter = "all" | "movie" | "episode";
 const UPCOMING_DAYS = 60;
 const MAX_CHIPS = 3;
 const MODE_KEY = "plexrust.calendarMode";
+const CINEMA_KEY = "plexrust.calendarCinema";
+
+function readCinema() {
+  try {
+    return localStorage.getItem(CINEMA_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 function readMode(): Mode {
   try {
@@ -64,10 +73,11 @@ function useReleases(start: Date, end: Date) {
   return { data, error };
 }
 
-function groupByDay(releases: Release[], filter: Filter, from: string, to: string) {
+function groupByDay(releases: Release[], filter: Filter, cinema: boolean, from: string, to: string) {
   const days = new Map<string, Release[]>();
   for (const r of releases) {
     if (filter !== "all" && r.kind !== filter) continue;
+    if (!cinema && r.movieRelease === "cinema") continue;
     const day = releaseDay(r);
     if (day < from || day > to) continue;
     days.set(day, [...(days.get(day) ?? []), r]);
@@ -79,6 +89,18 @@ function groupByDay(releases: Release[], filter: Filter, from: string, to: strin
 export function CalendarView() {
   const [mode, setModeState] = useState<Mode>(readMode);
   const [filter, setFilter] = useState<Filter>("all");
+  const [cinema, setCinemaState] = useState(readCinema);
+
+  function toggleCinema() {
+    setCinemaState((c) => {
+      try {
+        localStorage.setItem(CINEMA_KEY, c ? "0" : "1");
+      } catch {
+        // Not remembered.
+      }
+      return !c;
+    });
+  }
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -100,7 +122,7 @@ export function CalendarView() {
   const [start, end] = mode === "month" ? [grid[0], grid[41]] : [today, addDays(today, UPCOMING_DAYS)];
   const { data, error } = useReleases(start, end);
   const [from, to] = [dayKey(start), dayKey(end)];
-  const days = useMemo(() => groupByDay(data?.releases ?? [], filter, from, to), [data, filter, from, to]);
+  const days = useMemo(() => groupByDay(data?.releases ?? [], filter, cinema, from, to), [data, filter, cinema, from, to]);
 
   const monthTitle = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   const shiftMonth = (by: number) => setMonth((m) => new Date(m.getFullYear(), m.getMonth() + by, 1));
@@ -110,6 +132,16 @@ export function CalendarView() {
       <div className="mx-auto flex max-w-6xl flex-col gap-5 p-8">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="mr-auto text-2xl font-semibold">Calendar</h1>
+          <Button
+            variant={cinema ? "secondary" : "outline"}
+            size="sm"
+            aria-pressed={cinema}
+            disabled={filter === "episode"}
+            onClick={toggleCinema}
+            title={cinema ? "Hide cinema release dates" : "Show cinema release dates too"}
+          >
+            <Clapperboard /> In cinemas{cinema ? <Check /> : null}
+          </Button>
           <Segmented
             value={filter}
             onChange={setFilter}
