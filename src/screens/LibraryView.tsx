@@ -33,7 +33,7 @@ interface SortOption {
 }
 
 /** The same choices, order and defaults as Plex's own Sort menu. */
-const SORTS: SortOption[] = [
+export const SORTS: SortOption[] = [
   { key: "titleSort", label: "Title", desc: false },
   { key: "year", label: "Year", desc: true },
   { key: "originallyAvailableAt", label: "Release Date", desc: true },
@@ -81,7 +81,16 @@ const BITRATES: FilterValue[] = [
 ];
 
 /** The library's movies or shows, or its collections. */
-export function LibraryView({ section }: { section: LibrarySection }) {
+export function LibraryView({
+  section,
+  sort,
+  filters,
+}: {
+  section: LibrarySection;
+  /** Opens sorted this way instead of by the library's remembered sort, until another is picked. */
+  sort?: string;
+  filters?: Filters;
+}) {
   const [view, setView] = useState<"all" | "collections">("all");
   const [collections, setCollections] = useState<Metadata[] | null>(null);
 
@@ -109,7 +118,7 @@ export function LibraryView({ section }: { section: LibrarySection }) {
   return view === "collections" && collections ? (
     <CollectionsGrid section={section} collections={collections} toggle={toggle} />
   ) : (
-    <ItemsGrid section={section} toggle={toggle} />
+    <ItemsGrid section={section} toggle={toggle} initialSort={sort} initialFilters={filters} />
   );
 }
 
@@ -149,18 +158,31 @@ function CollectionsGrid({
  * items are fetched a page at a time as you scroll, so a 10,000 title library
  * scrolls as smoothly as a 10 title one.
  */
-function ItemsGrid({ section, toggle }: { section: LibrarySection; toggle: React.ReactNode }) {
+function ItemsGrid({
+  section,
+  toggle,
+  initialSort,
+  initialFilters,
+}: {
+  section: LibrarySection;
+  toggle: React.ReactNode;
+  initialSort?: string;
+  initialFilters?: Filters;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const prefs = usePrefs();
   // Remembered per library. Nothing loads until the saved pick is known, so
   // the grid doesn't load once in the default order first.
-  const savedSort = prefs?.librarySorts?.[section.key];
+  const [openedSort, setOpenedSort] = useState(initialSort);
+  const savedSort = openedSort ?? prefs?.librarySorts?.[section.key];
   const sort = savedSort && parseSort(savedSort).option ? savedSort : DEFAULT_SORT;
-  const setSort = (next: string) =>
+  const setSort = (next: string) => {
+    setOpenedSort(undefined);
     savePrefs({ librarySorts: { ...prefs?.librarySorts, [section.key]: next } }).catch(() => {});
+  };
   const [counts, setCounts] = useState<{ all: number; episodes?: number } | null>(null);
-  const [filters, setFilters] = useState<Filters>({});
+  const [filters, setFilters] = useState<Filters>(initialFilters ?? {});
   const [genres, setGenres] = useState<FilterValue[]>([]);
   const [decades, setDecades] = useState<FilterValue[]>([]);
   const [total, setTotal] = useState<number | null>(null);

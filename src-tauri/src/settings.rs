@@ -83,6 +83,21 @@ pub struct Prefs {
     pub hidden_hubs: Vec<String>,
     /// The last sort picked in each library, such as `addedAt:desc`, by section key.
     pub library_sorts: BTreeMap<String, String>,
+    /// Home rows made on the settings page, such as "Highest rated movies".
+    pub custom_rows: Vec<CustomRow>,
+}
+
+/// A Home row listing one library in a picked order, optionally narrowed down.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CustomRow {
+    pub id: String,
+    pub title: String,
+    /// Library section key.
+    pub section: String,
+    /// Plex sort such as `audienceRating:desc`.
+    pub sort: String,
+    pub filters: plex::Filters,
 }
 
 impl Default for Prefs {
@@ -101,6 +116,7 @@ impl Default for Prefs {
             hub_order: Vec::new(),
             hidden_hubs: Vec::new(),
             library_sorts: BTreeMap::new(),
+            custom_rows: Vec::new(),
         }
     }
 }

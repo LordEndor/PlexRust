@@ -1,19 +1,46 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { FeaturedBanner, featuredItems } from "@/components/FeaturedBanner";
 import { HubRow } from "@/components/HubRow";
 import { Skeleton } from "@/components/ui/skeleton";
-import { errorMessage, library, type Hub } from "@/lib/api";
+import { api, errorMessage, library, type Hub, type LibrarySection } from "@/lib/api";
 import { useLibraryChanged } from "@/lib/changes";
+import { CUSTOM_PREFIX, customHubs } from "@/lib/customRows";
+import { useNav } from "@/lib/nav";
 import { arrangeHubs, posterSize, usePrefs } from "@/lib/prefs";
 
 export function HomeView() {
   const [hubs, setHubs] = useState<Hub[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sections, setSections] = useState<LibrarySection[]>([]);
+  const [custom, setCustom] = useState<Hub[]>([]);
   const prefs = usePrefs();
+  const nav = useNav();
   const featured = useMemo(() => (hubs && prefs?.showFeatured !== false ? featuredItems(hubs) : []), [hubs, prefs]);
-  const rows = useMemo(() => (hubs ? arrangeHubs(hubs, prefs) : null), [hubs, prefs]);
+  const rows = useMemo(() => (hubs ? arrangeHubs([...hubs, ...custom], prefs) : null), [hubs, custom, prefs]);
   const width = posterSize(prefs).poster;
+
+  useEffect(() => {
+    api.librarySections().then(setSections, () => setSections([]));
+  }, []);
+
+  // Custom rows reload when they're edited on the settings page, as well as with Plex's rows.
+  const customRows = prefs?.customRows;
+  const customLoad = useRef(0);
+  const loadCustom = useCallback(() => {
+    const n = ++customLoad.current;
+    if (!customRows?.length || !sections.length) return setCustom([]);
+    // A slower, older load mustn't replace a newer one.
+    customHubs(customRows, sections).then((h) => n === customLoad.current && setCustom(h));
+  }, [customRows, sections]);
+  useEffect(loadCustom, [loadCustom]);
+  useLibraryChanged(loadCustom);
+
+  function showAll(hub: Hub) {
+    const row = customRows?.find((r) => CUSTOM_PREFIX + r.id === hub.hubIdentifier);
+    const section = row && sections.find((s) => s.key === row.section);
+    if (row && section) nav.navigate({ name: "library", section, sort: row.sort, filters: row.filters });
+  }
 
   const load = useCallback(() => {
     library
@@ -48,7 +75,11 @@ export function HomeView() {
         ))}
       {hubs?.length === 0 && !error && <p className="text-muted-foreground text-sm">Nothing here yet.</p>}
       {rows?.map((h) => (
-        <HubRow key={h.hubIdentifier} hub={h} />
+        <HubRow
+          key={h.hubIdentifier}
+          hub={h}
+          onShowAll={h.hubIdentifier.startsWith(CUSTOM_PREFIX) ? () => showAll(h) : undefined}
+        />
       ))}
     </div>
   );
