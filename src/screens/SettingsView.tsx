@@ -25,9 +25,12 @@ import {
   type Prefs,
   type SkipMode,
 } from "@/lib/prefs";
-import { arr, ARR_NAMES, CALENDAR_SUPPORTED, notifyArrConfigChanged, type ArrKind, type ArrStatus } from "@/lib/calendar";
-import { notifySeerrConfigChanged, seerr, SEERR_SUPPORTED, type SeerrInfo } from "@/lib/seerr";
+import { arr, ARR_NAMES, notifyArrConfigChanged, type ArrKind, type ArrStatus } from "@/lib/calendar";
+import { notifySeerrConfigChanged, seerr, type SeerrInfo } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
+
+/** The GitHub Pages build, which reaches servers at home from the page itself. */
+const IS_WEB = import.meta.env.MODE === "web";
 
 const SKIP_OPTIONS: { value: SkipMode; label: string }[] = [
   { value: "auto", label: "Automatically" },
@@ -141,24 +144,28 @@ export function SettingsView() {
           </>
         )}
 
-        {SEERR_SUPPORTED && (
-          <Section
-            title="Requests"
-            description="Connect your Seerr, Overseerr or Jellyseerr server to find and request movies and shows from Discover."
-          >
-            <SeerrSettings />
-          </Section>
-        )}
+        <Section
+          title="Requests"
+          description={
+            IS_WEB
+              ? "Connect your Seerr, Overseerr or Jellyseerr server to find and request movies and shows from Discover. In the browser, Seerr has to be reached through a proxy that allows web pages to call it (see docs/seerr-in-browser.md in the PlexRust repository)."
+              : "Connect your Seerr, Overseerr or Jellyseerr server to find and request movies and shows from Discover."
+          }
+        >
+          <SeerrSettings />
+        </Section>
 
-        {CALENDAR_SUPPORTED && (
-          <Section
-            title="Calendar"
-            description="Connect Radarr and Sonarr to see upcoming movies and episodes in Calendar. Either one is enough."
-          >
-            <ArrSettings kind="radarr" port={7878} />
-            <ArrSettings kind="sonarr" port={8989} />
-          </Section>
-        )}
+        <Section
+          title="Calendar"
+          description={
+            IS_WEB
+              ? "Connect Radarr and Sonarr to see upcoming movies and episodes in Calendar. Either one is enough. Chrome or Edge will ask to access devices on your local network; allow it."
+              : "Connect Radarr and Sonarr to see upcoming movies and episodes in Calendar. Either one is enough."
+          }
+        >
+          <ArrSettings kind="radarr" port={7878} />
+          <ArrSettings kind="sonarr" port={8989} />
+        </Section>
 
         <Section title="About">
           <Row label="PlexRust" hint="New versions are also checked for every time the app starts.">
@@ -441,7 +448,9 @@ function SeerrSettings() {
       ? `Connected as ${info.userName}${info.version ? ` · Seerr ${info.version}` : ""}.`
       : savedUrl
         ? "Connecting…"
-        : "Signs in with your Plex account, so requests are made as you.";
+        : IS_WEB
+          ? "In the browser, Seerr needs its API key as well as the address."
+          : "Signs in with your Plex account, so requests are made as you.";
 
   return (
     <>
@@ -460,7 +469,9 @@ function SeerrSettings() {
         hint={
           hasKey
             ? "Saved. Requests are made with the API key instead of your Plex account."
-            : "Optional. Only needed if signing in with Plex doesn't work. Found in Seerr under Settings, General."
+            : IS_WEB
+              ? "Needed in the browser. Found in Seerr under Settings, General."
+              : "Optional. Only needed if signing in with Plex doesn't work. Found in Seerr under Settings, General."
         }
       >
         <input
@@ -514,15 +525,13 @@ function ArrSettings({ kind, port }: { kind: ArrKind; port: number }) {
       })
       .catch(() => {});
     // Radarr and Sonarr usually run next to Seerr, so suggest the same machine.
-    if (SEERR_SUPPORTED) {
-      seerr
-        .config()
-        .then((c) => {
-          const host = c.url && new URL(c.url).hostname;
-          if (host) setPlaceholder(`http://${host}:${port}`);
-        })
-        .catch(() => {});
-    }
+    seerr
+      .config()
+      .then((c) => {
+        const host = c.url && new URL(c.url).hostname;
+        if (host) setPlaceholder(`http://${host}:${port}`);
+      })
+      .catch(() => {});
   }, [kind, port]);
 
   async function connect() {

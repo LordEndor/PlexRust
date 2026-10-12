@@ -54,9 +54,8 @@ app under Settings, General. Calendar then appears in the sidebar with a month
 view and an upcoming list of the next 60 days. Movies show each release date
 Radarr knows (digital and Blu-ray/DVD; cinema dates behind the In cinemas
 toggle), episodes show their air time
-in your time zone, and a check marks what is already downloaded. Like
-requests, it's only in the desktop app: the browser build is served over
-HTTPS and can't call a plain-HTTP server on your network.
+in your time zone, and a check marks what is already downloaded. Calendar
+also works in the browser version.
 
 ## Playback
 
@@ -104,7 +103,9 @@ It differs from the desktop app in a few ways:
   with hls.js). H.264 files are only repackaged; anything else, including 4K
   HDR, is re-encoded by the server at up to 1080p. Subtitles are burned in.
 - Skip intro/credits, Up Next and progress sync work the same way.
-- Requests (Discover) are desktop-only: Seerr sends no CORS headers, so a page
-  on github.io can't call it.
+- Calendar talks to Radarr and Sonarr straight from the page; both allow it.
+- Requests (Discover) need Seerr's API key and a small proxy in front of
+  Seerr, because Seerr sends no CORS headers; see
+  [docs/seerr-in-browser.md](docs/seerr-in-browser.md).
 - Chrome and Edge ask once for permission to reach devices on your local
   network the first time the page talks to a server at home.
