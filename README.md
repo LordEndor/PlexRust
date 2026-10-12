@@ -21,6 +21,7 @@ playback control, settings) is Rust; the interface is React with
 - [x] Player: embedded mpv, direct play (HDR passthrough), optional server transcode, audio/subtitle picker, progress sync
 - [x] Skip intros and credits from Plex markers, Up Next for episodes, settings page
 - [x] Requests through Seerr, Overseerr or Jellyseerr: Discover, request movies and seasons, My requests
+- [x] Calendar of upcoming movies (Radarr) and episodes (Sonarr): month view and upcoming list
 
 ## Layout
 
@@ -28,6 +29,7 @@ playback control, settings) is Rust; the interface is React with
 | --- | --- |
 | `crates/plex` | Async client for plex.tv and Plex Media Server. No Tauri dependency, unit tested. |
 | `crates/seerr` | Async client for Seerr (and Overseerr/Jellyseerr). Signs in with the Plex token. |
+| `crates/arr` | Async client for the Radarr and Sonarr calendars. |
 | `src-tauri` | The Tauri app: commands the UI calls, persisted settings. |
 | `src` | React UI. `components/ui` holds shadcn/ui components. |
 
@@ -43,6 +45,17 @@ instead if Plex sign-in is turned off in Seerr. Once connected, Discover
 appears in the sidebar: search TMDB, browse trending and upcoming titles,
 request movies (in 4K when a 4K Radarr is set up) or individual seasons, and
 follow them under My requests.
+
+## Calendar
+
+Settings, Calendar takes the address and API key of Radarr (port 7878 by
+default) and Sonarr (port 8989); either one is enough. The API key is in each
+app under Settings, General. Calendar then appears in the sidebar with a month
+view and an upcoming list of the next 60 days. Movies show each release date
+Radarr knows (in cinemas, digital, Blu-ray/DVD), episodes show their air time
+in your time zone, and a check marks what is already downloaded. Like
+requests, it's only in the desktop app: the browser build is served over
+HTTPS and can't call a plain-HTTP server on your network.
 
 ## Playback
 

@@ -18,6 +18,17 @@ pub struct Settings {
     pub tracks: BTreeMap<String, TrackChoice>,
     /// The Seerr (or Overseerr/Jellyseerr) server used for requests.
     pub seerr: SeerrSettings,
+    /// Radarr and Sonarr, read for the upcoming-releases calendar.
+    pub radarr: ArrSettings,
+    pub sonarr: ArrSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ArrSettings {
+    /// Empty when this server isn't set up.
+    pub url: String,
+    pub api_key: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

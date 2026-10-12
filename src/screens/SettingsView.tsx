@@ -25,6 +25,7 @@ import {
   type Prefs,
   type SkipMode,
 } from "@/lib/prefs";
+import { arr, ARR_NAMES, CALENDAR_SUPPORTED, notifyArrConfigChanged, type ArrKind, type ArrStatus } from "@/lib/calendar";
 import { notifySeerrConfigChanged, seerr, SEERR_SUPPORTED, type SeerrInfo } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
 
@@ -137,6 +138,16 @@ export function SettingsView() {
             description="Connect your Seerr, Overseerr or Jellyseerr server to find and request movies and shows from Discover."
           >
             <SeerrSettings />
+          </Section>
+        )}
+
+        {CALENDAR_SUPPORTED && (
+          <Section
+            title="Calendar"
+            description="Connect Radarr and Sonarr to see upcoming movies and episodes in Calendar. Either one is enough."
+          >
+            <ArrSettings kind="radarr" port={7878} />
+            <ArrSettings kind="sonarr" port={8989} />
           </Section>
         )}
 
@@ -469,5 +480,118 @@ function SeerrSettings() {
         </Button>
       </div>
     </>
+  );
+}
+
+/** Address and API key of Radarr or Sonarr, checked before saving. */
+function ArrSettings({ kind, port }: { kind: ArrKind; port: number }) {
+  const name = ARR_NAMES[kind];
+  const [url, setUrl] = useState("");
+  const [savedUrl, setSavedUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [hasKey, setHasKey] = useState(false);
+  const [placeholder, setPlaceholder] = useState(`http://192.168.1.10:${port}`);
+  const [status, setStatus] = useState<ArrStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    arr
+      .config()
+      .then((c) => {
+        setUrl(c[kind].url);
+        setSavedUrl(c[kind].url);
+        setHasKey(c[kind].hasApiKey);
+      })
+      .catch(() => {});
+    // Radarr and Sonarr usually run next to Seerr, so suggest the same machine.
+    if (SEERR_SUPPORTED) {
+      seerr
+        .config()
+        .then((c) => {
+          const host = c.url && new URL(c.url).hostname;
+          if (host) setPlaceholder(`http://${host}:${port}`);
+        })
+        .catch(() => {});
+    }
+  }, [kind, port]);
+
+  async function connect() {
+    setBusy(true);
+    setError(null);
+    try {
+      const st = await arr.connect(kind, url, apiKey.trim() || null);
+      const c = await arr.config();
+      setStatus(st);
+      setUrl(c[kind].url);
+      setSavedUrl(c[kind].url);
+      setHasKey(c[kind].hasApiKey);
+      setApiKey("");
+      notifyArrConfigChanged();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await arr.disconnect(kind);
+    setStatus(null);
+    setUrl("");
+    setSavedUrl("");
+    setHasKey(false);
+    setError(null);
+    notifyArrConfigChanged();
+  }
+
+  const hint = error
+    ? `Couldn't connect: ${error}`
+    : status
+      ? `Connected to ${status.appName || name}${status.version ? ` ${status.version}` : ""}.`
+      : savedUrl
+        ? "Saved."
+        : `Not set up. ${name} usually runs on port ${port}.`;
+
+  return (
+    <div className="divide-y">
+      <Row label={name} hint={hint}>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && url.trim() && connect()}
+          placeholder={placeholder}
+          className={inputClass}
+          spellCheck={false}
+          aria-label={`${name} address`}
+        />
+      </Row>
+      <Row
+        label="API key"
+        hint={hasKey ? "Saved." : `Found in ${name} under Settings, General.`}
+      >
+        <input
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && url.trim() && connect()}
+          placeholder={hasKey ? "••••••••" : "Not set"}
+          className={inputClass}
+          type="password"
+          spellCheck={false}
+          aria-label={`${name} API key`}
+        />
+      </Row>
+      <div className="flex justify-end gap-2 px-5 py-4">
+        {savedUrl && (
+          <Button variant="outline" disabled={busy} onClick={disconnect}>
+            Disconnect
+          </Button>
+        )}
+        <Button disabled={busy || !url.trim() || (!hasKey && !apiKey.trim())} onClick={connect}>
+          {busy && <Loader2 className="animate-spin" />}
+          {savedUrl && url === savedUrl && !apiKey ? "Test connection" : "Connect"}
+        </Button>
+      </div>
+    </div>
   );
 }

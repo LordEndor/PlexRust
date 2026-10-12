@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  CalendarDays,
   Clapperboard,
   Compass,
   Film,
@@ -23,8 +24,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/UserAvatar";
 import { api, errorMessage, type LibrarySection, type ServerConnection, type User } from "@/lib/api";
 import { NavContext, routeKey, type Nav, type Route } from "@/lib/nav";
+import { useCalendarEnabled } from "@/lib/calendar";
 import { useSeerrEnabled } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
+import { CalendarView } from "@/screens/CalendarView";
 import { HomeView } from "@/screens/HomeView";
 import { DiscoverView } from "@/screens/DiscoverView";
 import { ItemView } from "@/screens/ItemView";
@@ -68,6 +71,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const requestsEnabled = useSeerrEnabled();
+  const calendarEnabled = useCalendarEnabled();
 
   function toggleSidebar() {
     setCollapsed((c) => {
@@ -199,6 +203,15 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
               onClick={() => goRoot({ name: "discover" })}
             />
           )}
+          {calendarEnabled && (
+            <NavItem
+              icon={CalendarDays}
+              label="Calendar"
+              collapsed={collapsed}
+              active={root.name === "calendar"}
+              onClick={() => goRoot({ name: "calendar" })}
+            />
+          )}
           <div className="flex-1" />
           <NavItem
             icon={Settings}
@@ -285,6 +298,8 @@ function Screen({ route }: { route: Route }) {
       return <RequestView mediaType={route.mediaType} tmdbId={route.tmdbId} />;
     case "requests":
       return <RequestsView />;
+    case "calendar":
+      return <CalendarView />;
     case "playlists":
       return <PlaylistsView />;
     case "playlist":
