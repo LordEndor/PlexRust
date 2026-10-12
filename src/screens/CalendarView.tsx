@@ -129,7 +129,7 @@ export function CalendarView() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-6xl flex-col gap-5 p-8">
+      <div className="mx-auto flex max-w-[1800px] flex-col gap-5 p-8">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="mr-auto text-2xl font-semibold">Calendar</h1>
           <Button
@@ -270,7 +270,7 @@ function MonthGrid({
             <div
               key={key}
               className={cn(
-                "flex min-h-28 min-w-0 flex-col gap-1 p-1.5",
+                "flex min-h-40 min-w-0 flex-col gap-1.5 p-2",
                 i % 7 !== 6 && "border-r",
                 i < 35 && "border-b",
                 outside && "bg-muted/30",
@@ -317,16 +317,16 @@ function Chip({ release: r, onClick }: { release: Release; onClick: () => void }
       onClick={onClick}
       title={`${r.title} · ${releaseSubtitle(r)}`}
       className={cn(
-        "flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-left text-xs transition-colors",
+        "flex min-w-0 items-start gap-1.5 rounded-md border px-2 py-1 text-left text-xs transition-colors",
         KIND_CLASS[r.kind].chip,
       )}
     >
-      {r.kind === "movie" ? <Film className="size-3 shrink-0" /> : <Tv className="size-3 shrink-0" />}
-      <span className="min-w-0 flex-1 truncate">
-        <span className="font-medium">{r.title}</span>
-        {detail && <span className="text-muted-foreground"> {detail}</span>}
+      {r.kind === "movie" ? <Film className="mt-0.5 size-3 shrink-0" /> : <Tv className="mt-0.5 size-3 shrink-0" />}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="line-clamp-3 font-medium break-words">{r.title}</span>
+        {detail && <span className="text-muted-foreground truncate">{detail}</span>}
       </span>
-      {r.hasFile && <Check className="size-3 shrink-0 text-emerald-500" />}
+      {r.hasFile && <Check className="mt-0.5 size-3 shrink-0 text-emerald-500" />}
     </button>
   );
 }
