@@ -19,6 +19,8 @@ import {
   Play,
   RotateCcw,
   RotateCw,
+  SkipBack,
+  SkipForward,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -366,6 +368,11 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement && e.target.type !== "range") return;
       poke();
+      if (e.shiftKey && (e.key === "N" || e.key === "P")) {
+        const to = e.key === "N" ? live.current.info?.next : live.current.info?.previous;
+        if (to) onPlayNext(to.ratingKey);
+        return;
+      }
       const v = video.current;
       switch (e.key) {
         case " ":
@@ -405,7 +412,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [poke, togglePause, seekBy, setVol, toggleFullscreen, onClose]);
+  }, [poke, togglePause, seekBy, setVol, toggleFullscreen, onClose, onPlayNext]);
+
+  const episodes = !!(info?.previous || info?.queue.length);
 
   return createPortal(
     <div
@@ -416,7 +425,13 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         ref={video}
         className="absolute inset-0 size-full object-contain"
         playsInline
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          const v = e.currentTarget;
+          setTime(v.currentTime);
+          // Some seeks (and hls.js nudging past a gap) never send "playing";
+          // playback moving on with data ahead means it isn't buffering.
+          if (!v.paused && !v.seeking && v.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) setBuffering(false);
+        }}
         onPlay={() => setPaused(false)}
         onPause={() => setPaused(true)}
         onWaiting={() => setBuffering(true)}
@@ -538,6 +553,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         <div className="pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col gap-3 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pt-20 pb-5">
           <SeekBar time={time} duration={duration} onSeek={seekTo} />
           <div className="flex items-center gap-1 text-white">
+            {episodes && (
+              <IconButton
+                title="Previous episode (Shift+P)"
+                disabled={!info?.previous}
+                onClick={() => info?.previous && onPlayNext(info.previous.ratingKey)}
+              >
+                <SkipBack className="fill-current" />
+              </IconButton>
+            )}
             <IconButton title="Back 10s (←)" onClick={() => seekBy(-10)}>
               <RotateCcw />
             </IconButton>
@@ -547,6 +571,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
             <IconButton title="Forward 10s (→)" onClick={() => seekBy(10)}>
               <RotateCw />
             </IconButton>
+            {episodes && (
+              <IconButton
+                title="Next episode (Shift+N)"
+                disabled={!info?.next}
+                onClick={() => info?.next && onPlayNext(info.next.ratingKey)}
+              >
+                <SkipForward className="fill-current" />
+              </IconButton>
+            )}
             <span className="ml-3 text-sm text-white/80 tabular-nums">
               {formatTime(time)} / {formatTime(duration)}
             </span>
@@ -617,11 +650,13 @@ function IconButton({
   title,
   onClick,
   big,
+  disabled,
 }: {
   children: React.ReactNode;
   title: string;
   onClick: () => void;
   big?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Button
@@ -629,6 +664,7 @@ function IconButton({
       size="icon"
       title={title}
       onClick={onClick}
+      disabled={disabled}
       className={cn("text-white hover:bg-white/10", big && "size-11 [&_svg:not([class*='size-'])]:size-6")}
     >
       {children}
