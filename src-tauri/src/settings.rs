@@ -21,6 +21,18 @@ pub struct Settings {
     /// Radarr and Sonarr, read for the upcoming-releases calendar.
     pub radarr: ArrSettings,
     pub sonarr: ArrSettings,
+    /// qBittorrent's Web UI, for the Downloads screen.
+    pub qbittorrent: QbitSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct QbitSettings {
+    /// Empty when downloads aren't set up.
+    pub url: String,
+    /// Empty when qBittorrent lets this network in without a password.
+    pub username: String,
+    pub password: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

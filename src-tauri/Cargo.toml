@@ -19,6 +19,7 @@ tauri-build = { version = "2", features = [] }
 plex = { path = "../crates/plex" }
 seerr = { path = "../crates/seerr" }
 arr = { path = "../crates/arr" }
+qbit = { path = "../crates/qbit" }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"

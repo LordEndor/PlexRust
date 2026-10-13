@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Clapperboard,
   Compass,
+  Download,
   Film,
   Home as HomeIcon,
   Image,
@@ -25,12 +26,14 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { api, errorMessage, type LibrarySection, type ServerConnection, type User } from "@/lib/api";
 import { NavContext, routeKey, type Nav, type Route } from "@/lib/nav";
 import { useCalendarEnabled } from "@/lib/calendar";
+import { isActive, useDownloads, useDownloadsEnabled } from "@/lib/downloads";
 import { useSeerrEnabled } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
 import { CalendarView } from "@/screens/CalendarView";
 import { HomeView } from "@/screens/HomeView";
 import { DiscoverAllView } from "@/screens/DiscoverAllView";
 import { DiscoverView } from "@/screens/DiscoverView";
+import { DownloadsView } from "@/screens/DownloadsView";
 import { ItemView } from "@/screens/ItemView";
 import { LibraryView } from "@/screens/LibraryView";
 import { PlaylistsView, PlaylistView } from "@/screens/PlaylistView";
@@ -74,6 +77,10 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const requestsEnabled = useSeerrEnabled();
   const calendarEnabled = useCalendarEnabled();
+  const downloadsEnabled = useDownloadsEnabled();
+  // The Downloads screen asks every 2 seconds itself; this only feeds the count.
+  const downloads = useDownloads(!!downloadsEnabled, 30_000);
+  const downloading = downloads.snapshot?.torrents.filter(isActive).length ?? 0;
 
   function toggleSidebar() {
     setCollapsed((c) => {
@@ -221,6 +228,16 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
               onClick={() => goRoot({ name: "calendar" })}
             />
           )}
+          {downloadsEnabled && (
+            <NavItem
+              icon={Download}
+              label="Downloads"
+              badge={downloading || undefined}
+              collapsed={collapsed}
+              active={root.name === "downloads"}
+              onClick={() => goRoot({ name: "downloads" })}
+            />
+          )}
           <div className="flex-1" />
           <NavItem
             icon={Settings}
@@ -312,6 +329,8 @@ function Screen({ route }: { route: Route }) {
       return <RequestsView />;
     case "calendar":
       return <CalendarView />;
+    case "downloads":
+      return <DownloadsView />;
     case "playlists":
       return <PlaylistsView />;
     case "playlist":
@@ -324,12 +343,15 @@ function Screen({ route }: { route: Route }) {
 function NavItem({
   icon: Icon,
   label,
+  badge,
   active,
   collapsed,
   onClick,
 }: {
   icon: typeof Film;
   label: string;
+  /** A small count, such as how many things are downloading. */
+  badge?: number;
   active?: boolean;
   collapsed?: boolean;
   onClick?: () => void;
@@ -337,16 +359,24 @@ function NavItem({
   return (
     <button
       onClick={onClick}
-      title={collapsed ? label : undefined}
-      aria-label={label}
+      title={collapsed ? (badge != null ? `${label} (${badge})` : label) : undefined}
+      aria-label={badge != null ? `${label}, ${badge}` : label}
       className={cn(
         "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground flex items-center gap-3 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors",
         active && "bg-sidebar-accent text-foreground",
         collapsed && "justify-center px-0",
       )}
     >
-      <Icon className="size-4 shrink-0" />
+      <span className="relative shrink-0">
+        <Icon className="size-4" />
+        {badge != null && collapsed && <span className="bg-primary absolute -top-1 -right-1 size-2 rounded-full" />}
+      </span>
       {!collapsed && <span className="truncate">{label}</span>}
+      {badge != null && !collapsed && (
+        <span className="bg-primary text-primary-foreground ml-auto rounded-full px-1.5 text-xs leading-5 font-medium tabular-nums">
+          {badge}
+        </span>
+      )}
     </button>
   );
 }

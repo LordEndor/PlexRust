@@ -2853,6 +2853,7 @@ version = "0.1.0"
 dependencies = [
  "arr",
  "plex",
+ "qbit",
  "seerr",
  "serde",
  "serde_json",
@@ -3032,6 +3033,17 @@ checksum = "6f42ea446cab60335f76979ec15e12619a2165b5ae2c12166bef27d283a9fadf"
 dependencies = [
  "idna",
  "psl-types",
+]
+
+[[package]]
+name = "qbit"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
