@@ -1,7 +1,8 @@
 //! Async client for qBittorrent's Web API (`/api/v2`), the same API its Web
 //! UI uses.
 //!
-//! Signing in gives an `SID` cookie that the client keeps and sends along;
+//! Signing in gives a session cookie (`SID`, or `QBT_SID_<port>` since
+//! qBittorrent 5.1) that the client keeps and sends along;
 //! when qBittorrent forgets it (a restart, a timeout) the next call signs in
 //! again once. qBittorrent can also skip the password for some networks, so
 //! an empty username means "don't sign in".
@@ -28,6 +29,8 @@ pub enum Error {
         "qBittorrent asks for a username and password. Enter the ones for its Web UI (Tools, Options, Web UI)."
     )]
     NeedsLogin,
+    #[error("qBittorrent accepted the login but then refused the session. Check that the address is qBittorrent's own Web UI and not a proxy that drops cookies.")]
+    SessionRefused,
     #[error("qBittorrent has blocked this computer after too many wrong passwords. Wait a while, or restart qBittorrent.")]
     Banned,
     #[error("qBittorrent rejected the request ({status}): {message}")]
@@ -249,6 +252,7 @@ pub struct QbitClient {
     origin: String,
     username: String,
     password: String,
+    /// The session cookie as sent back, such as `SID=abc`.
     sid: Mutex<Option<String>>,
     /// qBittorrent 5 renamed pause and resume to stop and start.
     new_names: Mutex<Option<bool>>,
@@ -337,7 +341,10 @@ impl QbitClient {
         match self.send(method, path, params).await {
             Err(Error::NeedsLogin) if !self.username.is_empty() => {
                 self.login().await?;
-                self.send(method, path, params).await
+                match self.send(method, path, params).await {
+                    Err(Error::NeedsLogin) => Err(Error::SessionRefused),
+                    other => other,
+                }
             }
             other => other,
         }
@@ -355,7 +362,7 @@ impl QbitClient {
         };
         req = req.header(REFERER, &self.origin);
         if let Some(sid) = self.sid.lock().unwrap().clone() {
-            req = req.header(COOKIE, format!("SID={sid}"));
+            req = req.header(COOKIE, sid);
         }
         let resp = req.send().await.map_err(Error::Http)?;
         let status = resp.status();
@@ -387,13 +394,18 @@ impl QbitClient {
             .get_all(SET_COOKIE)
             .iter()
             .filter_map(|v| v.to_str().ok())
-            .find_map(|c| c.strip_prefix("SID=").map(|rest| rest.split(';').next().unwrap_or_default().to_owned()));
+            .filter_map(|c| c.split(';').next())
+            .find(|pair| {
+                let name = pair.split('=').next().unwrap_or_default();
+                name == "SID" || name.starts_with("QBT_SID")
+            })
+            .map(str::to_owned);
         let text = resp.text().await.map_err(Error::Http)?;
         match status {
             StatusCode::FORBIDDEN => Err(Error::Banned),
             StatusCode::NOT_FOUND => Err(Error::NotQbit),
             s if s.is_success() => match sid {
-                Some(sid) if !sid.is_empty() => {
+                Some(sid) if !sid.ends_with('=') => {
                     *self.sid.lock().unwrap() = Some(sid);
                     Ok(())
                 }
