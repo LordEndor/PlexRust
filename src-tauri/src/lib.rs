@@ -1,5 +1,6 @@
 mod calendar;
 mod commands;
+mod downloads;
 mod images;
 mod player;
 mod requests;
@@ -44,6 +45,7 @@ pub fn run() {
             app.manage(player::PreviewStore::default());
             app.manage(commands::FilteredLibrary::default());
             app.manage(requests::SeerrState::default());
+            app.manage(downloads::DownloadsState::default());
             app.manage(AppState {
                 plex,
                 settings: Mutex::new(settings),
@@ -103,6 +105,12 @@ pub fn run() {
             calendar::arr_connect,
             calendar::arr_disconnect,
             calendar::arr_calendar,
+            downloads::qbit_config,
+            downloads::qbit_connect,
+            downloads::qbit_disconnect,
+            downloads::downloads_list,
+            downloads::downloads_action,
+            downloads::downloads_toggle_alt_speed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

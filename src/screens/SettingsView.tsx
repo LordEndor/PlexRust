@@ -28,6 +28,7 @@ import {
   type SkipMode,
 } from "@/lib/prefs";
 import { arr, ARR_NAMES, notifyArrConfigChanged, type ArrKind, type ArrStatus } from "@/lib/calendar";
+import { notifyQbitConfigChanged, qbit, type QbitVersion } from "@/lib/downloads";
 import { notifySeerrConfigChanged, seerr, type SeerrInfo } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
 import { SORTS } from "@/screens/LibraryView";
@@ -169,6 +170,15 @@ export function SettingsView() {
           <ArrSettings kind="radarr" port={7878} />
           <ArrSettings kind="sonarr" port={8989} />
         </Section>
+
+        {!IS_WEB && (
+          <Section
+            title="Downloads"
+            description="Connect qBittorrent to follow downloads, and pause, resume or delete them, from Downloads in the sidebar. Use the address and login of its Web UI (in qBittorrent: Tools, Options, Web UI)."
+          >
+            <QbitSettings />
+          </Section>
+        )}
 
         <Section title="About">
           <Row label="PlexRust" hint="New versions are also checked for every time the app starts.">
@@ -828,6 +838,129 @@ function ArrSettings({ kind, port }: { kind: ArrKind; port: number }) {
         <Button disabled={busy || !url.trim() || (!hasKey && !apiKey.trim())} onClick={connect}>
           {busy && <Loader2 className="animate-spin" />}
           {savedUrl && url === savedUrl && !apiKey ? "Test connection" : "Connect"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function QbitSettings() {
+  const [url, setUrl] = useState("");
+  const [savedUrl, setSavedUrl] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [hasPassword, setHasPassword] = useState(false);
+  const [placeholder, setPlaceholder] = useState("http://192.168.1.10:8080");
+  const [version, setVersion] = useState<QbitVersion | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    qbit
+      .config()
+      .then((c) => {
+        setUrl(c.url);
+        setSavedUrl(c.url);
+        setUsername(c.username);
+        setHasPassword(c.hasPassword);
+      })
+      .catch(() => {});
+    // qBittorrent usually runs next to Seerr, so suggest the same machine.
+    seerr
+      .config()
+      .then((c) => {
+        const host = c.url && new URL(c.url).hostname;
+        if (host) setPlaceholder(`http://${host}:8080`);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function connect() {
+    setBusy(true);
+    setError(null);
+    try {
+      const v = await qbit.connect(url, username, password || null);
+      const c = await qbit.config();
+      setVersion(v);
+      setUrl(c.url);
+      setSavedUrl(c.url);
+      setUsername(c.username);
+      setHasPassword(c.hasPassword);
+      setPassword("");
+      notifyQbitConfigChanged();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await qbit.disconnect();
+    setVersion(null);
+    setUrl("");
+    setSavedUrl("");
+    setUsername("");
+    setHasPassword(false);
+    setError(null);
+    notifyQbitConfigChanged();
+  }
+
+  const hint = error
+    ? `Couldn't connect: ${error}`
+    : version
+      ? `Connected to qBittorrent ${version.app}.`
+      : savedUrl
+        ? "Saved."
+        : "Not set up. The Web UI usually runs on port 8080. Behind a VPN container such as gluetun, use the port that container publishes.";
+  const onEnter = (e: React.KeyboardEvent) => e.key === "Enter" && url.trim() && connect();
+
+  return (
+    <div className="divide-y">
+      <Row label="qBittorrent" hint={hint}>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={onEnter}
+          placeholder={placeholder}
+          className={inputClass}
+          spellCheck={false}
+          aria-label="qBittorrent address"
+        />
+      </Row>
+      <Row label="Username" hint="Leave empty if qBittorrent lets your home network in without a password.">
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={onEnter}
+          placeholder="admin"
+          className={inputClass}
+          spellCheck={false}
+          autoComplete="off"
+          aria-label="qBittorrent username"
+        />
+      </Row>
+      <Row label="Password" hint={hasPassword ? "Saved." : undefined}>
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={onEnter}
+          placeholder={hasPassword ? "••••••••" : "Not set"}
+          className={inputClass}
+          type="password"
+          autoComplete="off"
+          aria-label="qBittorrent password"
+        />
+      </Row>
+      <div className="flex justify-end gap-2 px-5 py-4">
+        {savedUrl && (
+          <Button variant="outline" disabled={busy} onClick={disconnect}>
+            Disconnect
+          </Button>
+        )}
+        <Button disabled={busy || !url.trim()} onClick={connect}>
+          {busy && <Loader2 className="animate-spin" />}
+          {savedUrl && url === savedUrl && !password ? "Test connection" : "Connect"}
         </Button>
       </div>
     </div>

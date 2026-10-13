@@ -1,0 +1,14 @@
+[package]
+name = "qbit"
+description = "Async client for qBittorrent's Web API"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util"] }
