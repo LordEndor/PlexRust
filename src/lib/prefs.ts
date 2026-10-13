@@ -31,6 +31,8 @@ export interface Prefs {
   librarySorts: Record<string, string>;
   /** Home rows made on the settings page, such as "Highest rated movies". */
   customRows: CustomRow[];
+  /** A message when something qBittorrent downloaded shows up in Plex. */
+  readyToasts: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -48,6 +50,7 @@ export const DEFAULT_PREFS: Prefs = {
   hiddenHubs: [],
   librarySorts: {},
   customRows: [],
+  readyToasts: true,
 };
 
 // One copy for the whole app, so the settings page and the player agree.

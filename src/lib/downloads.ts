@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface QbitConfig {
@@ -49,10 +49,28 @@ export interface Torrent {
   savePath: string;
 }
 
+/** The movie or episodes Radarr or Sonarr is fetching with a torrent. */
+export interface DownloadMedia {
+  kind: "movie" | "episode";
+  title: string;
+  year?: number | null;
+  poster?: string | null;
+  tmdbId?: number | null;
+  tvdbId?: number | null;
+  seasonNumber?: number | null;
+  /** Several for a season pack. */
+  episodes: number[];
+  episodeTitle?: string | null;
+  /** Such as `downloading`, `importPending` or `imported`. */
+  state?: string | null;
+}
+
 export interface Snapshot {
   torrents: Torrent[];
   transfer: { dlSpeed: number; upSpeed: number; freeSpace: number | null; altSpeed: boolean };
   categories: string[];
+  /** By torrent hash, for the torrents Radarr or Sonarr know. */
+  media: Record<string, DownloadMedia>;
 }
 
 export type DownloadAction = "pause" | "resume" | "forceStart" | "recheck" | "delete" | "deleteWithFiles";
@@ -127,6 +145,71 @@ export function useDownloads(enabled: boolean, everyMs: number) {
     };
   }, [enabled, everyMs, tick]);
   return { snapshot, error, refresh: () => setTick((t) => t + 1) };
+}
+
+/** The list the sidebar keeps, shared with screens that show download progress. */
+export const DownloadsContext = createContext<Snapshot | null>(null);
+
+export function useDownloadsSnapshot() {
+  return useContext(DownloadsContext);
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** "S02E05 · Trojan's Horse", "Season 2 · 8 episodes" or the year. */
+export function mediaSubtitle(m: DownloadMedia) {
+  if (m.kind === "movie") return m.year ? String(m.year) : "Movie";
+  if (m.episodes.length === 1 && m.seasonNumber != null) {
+    return [`S${pad(m.seasonNumber)}E${pad(m.episodes[0])}`, m.episodeTitle].filter(Boolean).join(" · ");
+  }
+  const season = m.seasonNumber != null ? `Season ${m.seasonNumber}` : "Several seasons";
+  return m.episodes.length > 1 ? `${season} · ${m.episodes.length} episodes` : season;
+}
+
+/** "Severance S02E05" for a toast. */
+export function mediaName(m: DownloadMedia) {
+  if (m.kind === "movie") return m.title;
+  if (m.episodes.length === 1 && m.seasonNumber != null) return `${m.title} S${pad(m.seasonNumber)}E${pad(m.episodes[0])}`;
+  return m.seasonNumber != null ? `${m.title} season ${m.seasonNumber}` : m.title;
+}
+
+/** What to look for: a movie, a whole show, or one episode of it. */
+export type DownloadMatch =
+  | { kind: "movie"; tmdbId?: number | null }
+  | { kind: "show"; tmdbId?: number | null; tvdbId?: number | null; season?: number | null; episode?: number | null };
+
+function matches(m: DownloadMedia, want: DownloadMatch) {
+  if (want.kind === "movie") return m.kind === "movie" && want.tmdbId != null && m.tmdbId === want.tmdbId;
+  if (m.kind !== "episode") return false;
+  const sameShow =
+    (want.tvdbId != null && m.tvdbId === want.tvdbId) || (want.tmdbId != null && m.tmdbId === want.tmdbId);
+  if (!sameShow) return false;
+  if (want.season != null && m.seasonNumber != null && m.seasonNumber !== want.season) return false;
+  if (want.episode != null && m.episodes.length > 0 && !m.episodes.includes(want.episode)) return false;
+  return true;
+}
+
+export interface DownloadProgress {
+  /** 0 to 1, over every matching torrent. */
+  progress: number;
+  /** Seconds until the slowest one is done, when known. */
+  eta: number | null;
+  stalled: boolean;
+}
+
+/** Progress of unfinished downloads of a title, or null when nothing is downloading it. */
+export function downloadProgress(snapshot: Snapshot | null, want: DownloadMatch): DownloadProgress | null {
+  if (!snapshot) return null;
+  const hits = snapshot.torrents.filter((t) => t.progress < 1 && snapshot.media[t.hash] && matches(snapshot.media[t.hash], want));
+  if (hits.length === 0) return null;
+  const size = hits.reduce((n, t) => n + t.size, 0);
+  const done = hits.reduce((n, t) => n + t.downloaded, 0);
+  const etas = hits.map((t) => t.eta);
+  return {
+    progress: size > 0 ? done / size : hits[0].progress,
+    eta: etas.every((e) => e != null) ? Math.max(...(etas as number[])) : null,
+    stalled: hits.every((t) => t.dlSpeed === 0),
+  };
 }
 
 /** Downloading in any way: the count on the sidebar. */

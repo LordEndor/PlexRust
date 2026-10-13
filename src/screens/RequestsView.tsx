@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 
+import { DownloadChip } from "@/components/DownloadChip";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage } from "@/lib/api";
@@ -97,6 +98,13 @@ function RequestRow({ request: r }: { request: SeerrRequest }) {
           {error && <div className="text-destructive text-xs">{error}</div>}
         </div>
       </button>
+      <DownloadChip
+        match={
+          r.media.mediaType === "movie"
+            ? { kind: "movie", tmdbId: r.media.tmdbId }
+            : { kind: "show", tmdbId: r.media.tmdbId }
+        }
+      />
       <span className={cn("shrink-0 rounded-md px-1.5 py-0.5 text-xs font-semibold", TONE_CLASS[status.tone])}>
         {status.label}
       </span>

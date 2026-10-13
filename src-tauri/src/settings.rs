@@ -97,6 +97,8 @@ pub struct Prefs {
     pub library_sorts: BTreeMap<String, String>,
     /// Home rows made on the settings page, such as "Highest rated movies".
     pub custom_rows: Vec<CustomRow>,
+    /// A message when something qBittorrent downloaded shows up in Plex.
+    pub ready_toasts: bool,
 }
 
 /// A Home row listing one library in a picked order, optionally narrowed down.
@@ -129,6 +131,7 @@ impl Default for Prefs {
             hidden_hubs: Vec::new(),
             library_sorts: BTreeMap::new(),
             custom_rows: Vec::new(),
+            ready_toasts: true,
         }
     }
 }
