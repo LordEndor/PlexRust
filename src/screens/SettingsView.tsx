@@ -177,6 +177,21 @@ export function SettingsView() {
             description="Connect qBittorrent to follow downloads, and pause, resume or delete them, from Downloads in the sidebar. Use the address and login of its Web UI (in qBittorrent: Tools, Options, Web UI)."
           >
             <QbitSettings />
+            {prefs && (
+              <Row
+                label="Ready to watch"
+                hint="A message with a Play button when something Radarr or Sonarr downloaded shows up in Plex."
+              >
+                <Segmented
+                  value={prefs.readyToasts ? "on" : "off"}
+                  options={[
+                    { value: "on", label: "On" },
+                    { value: "off", label: "Off" },
+                  ]}
+                  onChange={(v) => savePrefs({ readyToasts: v === "on" })}
+                />
+              </Row>
+            )}
           </Section>
         )}
 

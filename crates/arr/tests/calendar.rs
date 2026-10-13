@@ -19,6 +19,13 @@ const SONARR_CALENDAR: &str = r#"[
                {"coverType":"fanart","url":"/MediaCover/3/fanart.jpg"}]}}
 ]"#;
 
+const SONARR_QUEUE: &str = r#"{"page":1,"totalRecords":2,"records":[
+  {"id":1,"downloadId":"ABCDEF","title":"Severance.S02.1080p","seasonNumber":2,"trackedDownloadState":"downloading",
+   "series":{"title":"Severance","year":2022,"tvdbId":371980,"tmdbId":95396,"images":[{"coverType":"poster","remoteUrl":"https://artworks.thetvdb.com/p.jpg"}]},
+   "episode":{"seasonNumber":2,"episodeNumber":5,"title":"Trojan's Horse"}},
+  {"id":2,"title":"Nothing to match","trackedDownloadState":"downloading"}
+]}"#;
+
 async fn serve(app: &'static str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -46,6 +53,8 @@ async fn serve(app: &'static str) -> String {
                     let body = if app == "Radarr" { RADARR_CALENDAR } else { SONARR_CALENDAR };
                     assert_eq!(app == "Sonarr", line.contains("includeSeries=true"), "{line}");
                     ("200 OK", body.to_owned())
+                } else if line.starts_with("GET /base/api/v3/queue?pageSize=1000&includeSeries=true&includeEpisode=true ") {
+                    ("200 OK", SONARR_QUEUE.to_owned())
                 } else {
                     ("404 Not Found", format!(r#"{{"message":"{line}"}}"#))
                 };
@@ -104,4 +113,18 @@ async fn explains_bad_keys_and_swapped_servers() {
     let err = swapped.status().await.unwrap_err();
     assert!(matches!(err, Error::WrongApp { .. }));
     assert_eq!(err.to_string(), "that address is Sonarr, not Radarr");
+}
+
+#[tokio::test]
+async fn reads_the_queue_by_download_hash() {
+    let url = serve("Sonarr").await;
+    let client = ArrClient::new(Kind::Sonarr, &url, "secret").unwrap();
+    let queue = client.queue().await.unwrap();
+    assert_eq!(queue.len(), 1, "records without a download id are skipped");
+    let q = &queue[0];
+    assert_eq!(q.download_id, "abcdef");
+    assert_eq!((q.season_number, q.episode_number), (Some(2), Some(5)));
+    assert_eq!(q.episode_title.as_deref(), Some("Trojan's Horse"));
+    assert_eq!(q.tmdb_id, Some(95396));
+    assert_eq!(q.state.as_deref(), Some("downloading"));
 }

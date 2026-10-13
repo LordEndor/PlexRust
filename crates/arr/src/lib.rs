@@ -97,6 +97,27 @@ pub struct Release {
     pub tvdb_id: Option<u64>,
 }
 
+/// What Radarr or Sonarr is fetching for one download, matched to qBittorrent
+/// by `download_id`. A season pack lists every episode it holds.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueItem {
+    /// The download client's id: for torrents the info hash, lowercased here.
+    pub download_id: String,
+    pub kind: ReleaseKind,
+    /// The movie's or the show's title.
+    pub title: String,
+    pub year: Option<u32>,
+    pub season_number: Option<u32>,
+    pub episode_number: Option<u32>,
+    pub episode_title: Option<String>,
+    pub poster: Option<String>,
+    pub tmdb_id: Option<u64>,
+    pub tvdb_id: Option<u64>,
+    /// Such as `downloading`, `importPending`, `importing`, `imported` or `failedPending`.
+    pub state: Option<String>,
+}
+
 pub struct ArrClient {
     http: reqwest::Client,
     kind: Kind,
@@ -149,6 +170,21 @@ impl ArrClient {
             Kind::Radarr => items.iter().flat_map(|m| movie_releases(m, start, end)).collect(),
             Kind::Sonarr => items.iter().filter_map(episode_release).collect(),
         })
+    }
+
+    /// Everything in the download queue.
+    pub async fn queue(&self) -> Result<Vec<QueueItem>> {
+        let mut query = vec![("pageSize", "1000".to_owned())];
+        match self.kind {
+            Kind::Radarr => query.push(("includeMovie", "true".to_owned())),
+            Kind::Sonarr => {
+                query.push(("includeSeries", "true".to_owned()));
+                query.push(("includeEpisode", "true".to_owned()));
+            }
+        }
+        let v = self.get("/queue", &query).await?;
+        let records = v["records"].as_array().cloned().unwrap_or_default();
+        Ok(records.iter().filter_map(|r| queue_item(self.kind, r)).collect())
     }
 
     async fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Value> {
@@ -239,6 +275,45 @@ fn episode_release(e: &Value) -> Option<Release> {
         fanart: image(&series["images"], "fanart"),
         tmdb_id: series["tmdbId"].as_u64().filter(|id| *id > 0),
         tvdb_id: series["tvdbId"].as_u64().filter(|id| *id > 0),
+    })
+}
+
+fn queue_item(kind: Kind, r: &Value) -> Option<QueueItem> {
+    let download_id = string(&r["downloadId"])?.to_ascii_lowercase();
+    let state = string(&r["trackedDownloadState"]);
+    Some(match kind {
+        Kind::Radarr => {
+            let m = &r["movie"];
+            QueueItem {
+                download_id,
+                kind: ReleaseKind::Movie,
+                title: string(&m["title"]).or_else(|| string(&r["title"]))?,
+                year: m["year"].as_u64().map(|y| y as u32).filter(|y| *y > 0),
+                season_number: None,
+                episode_number: None,
+                episode_title: None,
+                poster: image(&m["images"], "poster"),
+                tmdb_id: m["tmdbId"].as_u64().filter(|id| *id > 0),
+                tvdb_id: None,
+                state,
+            }
+        }
+        Kind::Sonarr => {
+            let (series, episode) = (&r["series"], &r["episode"]);
+            QueueItem {
+                download_id,
+                kind: ReleaseKind::Episode,
+                title: string(&series["title"]).or_else(|| string(&r["title"]))?,
+                year: series["year"].as_u64().map(|y| y as u32).filter(|y| *y > 0),
+                season_number: [&episode["seasonNumber"], &r["seasonNumber"]].into_iter().find_map(Value::as_u64).map(|n| n as u32),
+                episode_number: episode["episodeNumber"].as_u64().map(|n| n as u32),
+                episode_title: string(&episode["title"]).filter(|t| t != "TBA"),
+                poster: image(&series["images"], "poster"),
+                tmdb_id: series["tmdbId"].as_u64().filter(|id| *id > 0),
+                tvdb_id: series["tvdbId"].as_u64().filter(|id| *id > 0),
+                state,
+            }
+        }
     })
 }
 

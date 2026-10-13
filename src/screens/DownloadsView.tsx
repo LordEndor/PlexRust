@@ -42,7 +42,9 @@ import {
   STATE_CLASS,
   STATE_LABELS,
   useDownloads,
+  mediaSubtitle,
   type DownloadAction,
+  type DownloadMedia,
   type Torrent,
 } from "@/lib/downloads";
 import { cn } from "@/lib/utils";
@@ -214,7 +216,7 @@ export function DownloadsView() {
         ) : (
           <div className="bg-card divide-y rounded-xl border">
             {shown.map((t) => (
-              <TorrentRow key={t.hash} torrent={t} onAction={(a) => act(a, t)} onDelete={() => setDeleting(t)} />
+              <TorrentRow key={t.hash} torrent={t} media={snapshot?.media[t.hash]} onAction={(a) => act(a, t)} onDelete={() => setDeleting(t)} />
             ))}
           </div>
         )}
@@ -236,10 +238,13 @@ export function DownloadsView() {
 
 function TorrentRow({
   torrent: t,
+  media,
   onAction,
   onDelete,
 }: {
   torrent: Torrent;
+  /** The movie or episodes, when Radarr or Sonarr fetches this. */
+  media?: DownloadMedia;
   onAction: (action: DownloadAction) => void;
   onDelete: () => void;
 }) {
@@ -287,16 +292,27 @@ function TorrentRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className="flex items-center gap-4 px-5 py-4">
+          {media && (
+            <div className="bg-muted aspect-[2/3] w-11 shrink-0 self-start overflow-hidden rounded-md border">
+              {media.poster && <img src={media.poster} alt="" loading="lazy" className="size-full object-cover" />}
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="truncate text-sm font-medium" title={t.name}>
-                {t.name}
+                {media ? media.title : t.name}
               </span>
+              {media && <span className="text-muted-foreground shrink-0 truncate text-sm">{mediaSubtitle(media)}</span>}
               <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-xs", STATE_CLASS[t.state])} title={t.rawState}>
                 {t.forceStart && t.state === "downloading" ? "Forced" : STATE_LABELS[t.state]}
               </span>
               {t.category && <span className="text-muted-foreground shrink-0 text-xs">{t.category}</span>}
             </div>
+            {media && (
+              <div className="text-muted-foreground mt-0.5 truncate text-xs" title={t.name}>
+                {t.name}
+              </div>
+            )}
             <div className="bg-muted mt-2 h-1.5 overflow-hidden rounded-full">
               <div
                 className={cn(

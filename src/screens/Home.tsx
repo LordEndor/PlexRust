@@ -26,7 +26,9 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { api, errorMessage, type LibrarySection, type ServerConnection, type User } from "@/lib/api";
 import { NavContext, routeKey, type Nav, type Route } from "@/lib/nav";
 import { useCalendarEnabled } from "@/lib/calendar";
-import { isActive, useDownloads, useDownloadsEnabled } from "@/lib/downloads";
+import { DownloadsContext, isActive, useDownloads, useDownloadsEnabled } from "@/lib/downloads";
+import { usePrefs } from "@/lib/prefs";
+import { ReadyToasts } from "@/components/ReadyToasts";
 import { useSeerrEnabled } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
 import { CalendarView } from "@/screens/CalendarView";
@@ -81,6 +83,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   // The Downloads screen asks every 2 seconds itself; this only feeds the count.
   const downloads = useDownloads(!!downloadsEnabled, 30_000);
   const downloading = downloads.snapshot?.torrents.filter(isActive).length ?? 0;
+  const prefs = usePrefs();
 
   function toggleSidebar() {
     setCollapsed((c) => {
@@ -157,6 +160,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
 
   return (
     <NavContext.Provider value={nav}>
+      <DownloadsContext.Provider value={downloads.snapshot}>
       <div className="flex h-full">
         <aside
           className={cn(
@@ -303,6 +307,8 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
           )}
         </div>
       </div>
+      <ReadyToasts snapshot={downloads.snapshot} enabled={prefs?.readyToasts ?? true} hidden={top.name === "player"} />
+      </DownloadsContext.Provider>
     </NavContext.Provider>
   );
 }

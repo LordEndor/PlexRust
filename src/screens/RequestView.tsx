@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Library, Loader2, Send, Star } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { DownloadChip } from "@/components/DownloadChip";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { errorMessage } from "@/lib/api";
@@ -112,6 +113,9 @@ export function RequestView({ mediaType, tmdbId }: { mediaType: MediaType; tmdbI
                   {status.label}
                 </span>
               )}
+              <DownloadChip
+                match={mediaType === "movie" ? { kind: "movie", tmdbId } : { kind: "show", tmdbId }}
+              />
             </div>
             {details.genres && details.genres.length > 0 && (
               <div className="flex flex-wrap gap-2">

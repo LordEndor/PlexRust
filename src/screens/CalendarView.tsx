@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, Check, Clapperboard, ChevronLeft, ChevronRight, Film, Search, Tv } from "lucide-react";
 
+import { DownloadChip } from "@/components/DownloadChip";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Segmented } from "@/components/ui/segmented";
@@ -18,6 +19,7 @@ import {
   type Release,
 } from "@/lib/calendar";
 import { errorMessage } from "@/lib/api";
+import type { DownloadMatch } from "@/lib/downloads";
 import { useNav } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
@@ -310,6 +312,13 @@ function MonthGrid({
   );
 }
 
+/** What qBittorrent would be downloading for this release. */
+function releaseMatch(r: Release): DownloadMatch {
+  return r.kind === "movie"
+    ? { kind: "movie", tmdbId: r.tmdbId }
+    : { kind: "show", tmdbId: r.tmdbId, tvdbId: r.tvdbId, season: r.seasonNumber, episode: r.episodeNumber };
+}
+
 function Chip({ release: r, onClick }: { release: Release; onClick: () => void }) {
   const detail = r.kind === "episode" ? releaseSubtitle(r).split(" · ")[0] : releaseSubtitle(r);
   return (
@@ -326,7 +335,11 @@ function Chip({ release: r, onClick }: { release: Release; onClick: () => void }
         <span className="line-clamp-3 font-medium break-words">{r.title}</span>
         {detail && <span className="text-muted-foreground truncate">{detail}</span>}
       </span>
-      {r.hasFile && <Check className="mt-0.5 size-3 shrink-0 text-emerald-500" />}
+      {r.hasFile ? (
+        <Check className="mt-0.5 size-3 shrink-0 text-emerald-500" />
+      ) : (
+        <DownloadChip match={releaseMatch(r)} compact className="px-1 py-0 text-[10px]" />
+      )}
     </button>
   );
 }
@@ -388,10 +401,12 @@ function ReleaseRow({ release: r, onClick }: { release: Release; onClick: () => 
         <span className="text-muted-foreground text-xs tabular-nums">
           {[time, r.network].filter(Boolean).join(" · ")}
         </span>
-        {r.hasFile && (
+        {r.hasFile ? (
           <span className="flex items-center gap-1 text-xs text-emerald-500">
             <Check className="size-3" /> Downloaded
           </span>
+        ) : (
+          <DownloadChip match={releaseMatch(r)} />
         )}
       </div>
     </button>
@@ -484,10 +499,12 @@ function ReleaseDialog({ release: r, onClose }: { release: Release | null; onClo
                       .filter(Boolean)
                       .join(" · ")}
                   </span>
-                  {r.hasFile && (
+                  {r.hasFile ? (
                     <span className="flex items-center gap-1 text-xs text-emerald-500">
                       <Check className="size-3" /> Downloaded
                     </span>
+                  ) : (
+                    <DownloadChip match={releaseMatch(r)} />
                   )}
                 </div>
                 {r.overview && <p className="text-sm leading-relaxed">{r.overview}</p>}
