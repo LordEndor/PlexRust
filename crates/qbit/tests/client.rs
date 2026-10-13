@@ -16,6 +16,11 @@ struct Fake {
 }
 
 async fn serve(api: &'static str, fake: Arc<Mutex<Fake>>) -> String {
+    serve_with(api, "SID", fake).await
+}
+
+/// `cookie` is the name qBittorrent gives the session cookie.
+async fn serve_with(api: &'static str, cookie: &'static str, fake: Arc<Mutex<Fake>>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -50,13 +55,13 @@ async fn serve(api: &'static str, fake: Arc<Mutex<Fake>>) -> String {
                 let mut extra = String::new();
                 let (status, reply) = {
                     let mut f = fake.lock().unwrap();
-                    let valid = format!("cookie: sid=s{}\r\n", f.logins);
+                    let valid = format!("cookie: {}=s{}\r\n", cookie.to_ascii_lowercase(), f.logins);
                     if !lower.contains("referer: http://127.0.0.1") {
                         ("401 Unauthorized", String::new())
                     } else if path == "/qb/api/v2/auth/login" {
                         if body == "username=albin&password=p%26ss" {
                             f.logins += 1;
-                            extra = format!("Set-Cookie: SID=s{}; HttpOnly; path=/\r\n", f.logins);
+                            extra = format!("Set-Cookie: {cookie}=s{}; HttpOnly; path=/\r\n", f.logins);
                             ("200 OK", "Ok.".to_owned())
                         } else {
                             ("200 OK", "Fails.".to_owned())
@@ -145,4 +150,11 @@ async fn no_username_when_a_password_is_needed() {
     let url = serve("2.11.2", Arc::new(Mutex::new(Fake::default()))).await;
     let client = QbitClient::new(&url, "", "").unwrap();
     assert!(matches!(client.version().await, Err(Error::NeedsLogin)));
+}
+
+#[tokio::test]
+async fn follows_the_port_named_cookie_of_qbittorrent_5_1() {
+    let url = serve_with("2.12.0", "QBT_SID_8888", Arc::new(Mutex::new(Fake::default()))).await;
+    let client = QbitClient::new(&url, "albin", "p&ss").unwrap();
+    assert_eq!(client.version().await.unwrap().app, "v5.0.2");
 }
