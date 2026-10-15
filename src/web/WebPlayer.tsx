@@ -1,7 +1,11 @@
 /**
  * The browser build's player, used in place of the mpv one (see
- * vite.config.ts). It plays Plex's HLS transcode in a <video> element through
- * hls.js and keeps the desktop player's skip intro/credits and Up Next rules.
+ * vite.config.ts). It follows a PlaybackPlan (see web/playback): direct play
+ * hands the file to the <video> element, direct stream and transcode play
+ * Plex's HLS through hls.js (or natively in Safari). Text subtitles are drawn
+ * in the browser; image ones are burned in by Plex. When a plan fails it steps
+ * down the ladder (direct play, direct stream, transcode). Keeps the desktop
+ * player's skip intro/credits and Up Next rules, and a stats overlay (I).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -11,6 +15,7 @@ import {
   AudioLines,
   Captions,
   Gauge,
+  Info,
   Loader2,
   Maximize,
   Minimize,
@@ -40,7 +45,29 @@ import { loadPrefs, usePrefs, type Prefs } from "@/lib/prefs";
 import { formatTime, playback, QUALITIES, type PlaybackState } from "@/lib/player";
 import { skipSegments, useSkips } from "@/lib/skips";
 import { cn } from "@/lib/utils";
-import { getPlaybackInfo, selectStreams, timelineUrl, transcodeUrl, type RawStream, type WebPlaybackInfo } from "@/web/plex";
+import {
+  directPlayUrl,
+  getPlaybackInfo,
+  selectStreams,
+  streamUrl,
+  timelineUrl,
+  type RawStream,
+  type WebPlaybackInfo,
+} from "@/web/plex";
+import { detectCaps } from "@/web/playback/caps";
+import { decide, fallback } from "@/web/playback/decide";
+import { sourceFor } from "@/web/playback/source";
+import { StatsOverlay } from "@/web/playback/StatsOverlay";
+import { attachSubtitles } from "@/web/playback/subtitles";
+import {
+  ORIGINAL_TRANSCODE_MAX,
+  type BrowserCaps,
+  type DecideOptions,
+  type PlaybackMode,
+  type PlaybackPlan,
+  type QualityChoice,
+  type SourceMedia,
+} from "@/web/playback/types";
 
 const REPORT_EVERY_MS = 10_000;
 const UP_NEXT_SECS = 10;
@@ -50,23 +77,28 @@ const HIDE_CONTROLS_MS = 3000;
 // episode (a fresh Player mounted in the same render) can cancel it.
 let exitFullscreenTimer: number | undefined;
 
-interface WebQuality {
-  /** Matches the label saved in prefs. */
-  label: string;
-  name: string;
-  kbps: number;
-  resolution: string;
-}
+/** The desktop list; Original is a transcode cap of 1440p (or a direct play / stream when the browser takes the file). */
+const QUALITY_CHOICES: QualityChoice[] = QUALITIES.map((q) => {
+  if (!q.kbps) {
+    return {
+      label: q.label,
+      name: "Original",
+      maxBitrateKbps: null,
+      maxWidth: ORIGINAL_TRANSCODE_MAX.width,
+      maxHeight: ORIGINAL_TRANSCODE_MAX.height,
+    };
+  }
+  const [w, h] = (q.resolution ?? "1920x1080").split("x").map(Number);
+  return { label: q.label, name: q.label, maxBitrateKbps: q.kbps, maxWidth: w, maxHeight: h };
+});
 
-/**
- * The desktop list, except Original: a browser can't play most originals, so
- * it means "as good as the browser takes", which leaves H.264 files untouched.
- */
-const WEB_QUALITIES: WebQuality[] = QUALITIES.map((q) =>
-  q.kbps
-    ? { label: q.label, name: q.label, kbps: q.kbps, resolution: q.resolution! }
-    : { label: q.label, name: "Best · up to 1080p", kbps: 200_000, resolution: "1920x1080" },
-);
+const MODE_LABEL: Record<PlaybackMode, string> = {
+  directPlay: "Direct play",
+  directStream: "Direct stream",
+  transcode: "Transcode",
+};
+
+const planKey = (p: PlaybackPlan) => `${p.mode}:${p.subtitles.kind}`;
 
 function streamLabel(s: RawStream) {
   return s.extendedDisplayTitle || s.displayTitle || s.title || `Track ${s.id}`;
@@ -108,15 +140,27 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [quality, setQuality] = useState<WebQuality>(WEB_QUALITIES[0]);
+  const [quality, setQuality] = useState<QualityChoice>(QUALITY_CHOICES[0]);
   const [audioId, setAudioId] = useState<number | undefined>();
   const [subId, setSubId] = useState(0);
   const [controls, setControls] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [plan, setPlan] = useState<PlaybackPlan | null>(null);
+  const [stats, setStats] = useState(false);
 
   const video = useRef<HTMLVideoElement>(null);
   const hls = useRef<Hls | null>(null);
   const session = useRef<string | null>(null);
+  const caps = useRef<BrowserCaps | null>(null);
+  const source = useRef<SourceMedia | null>(null);
+  const planRef = useRef<PlaybackPlan | null>(null);
+  const tracks = useRef<{ audio: number | undefined; sub: number }>({ audio: undefined, sub: 0 });
+  const forceBurn = useRef(false);
+  const subsCleanup = useRef<(() => void) | null>(null);
+  /** Bumped by every start and by unmount, so older async work can tell it was superseded. */
+  const startId = useRef(0);
+  /** Plans that already failed since the last start the viewer asked for. */
+  const failed = useRef(new Set<string>());
   const duration = (info?.durationMs ?? 0) / 1000;
   const live = useRef({ time: 0, duration: 0, paused: false, info: null as WebPlaybackInfo | null, quality });
   live.current = { time, duration, paused, info, quality };
@@ -171,52 +215,136 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     hls.current = null;
     if (session.current) playback.stopTranscode(session.current).catch(() => {});
     session.current = null;
+    subsCleanup.current?.();
+    subsCleanup.current = null;
+    const v = video.current;
+    if (v?.hasAttribute("src")) {
+      v.removeAttribute("src");
+      v.load();
+    }
   }, []);
 
-  /** (Re)starts Plex's transcode at `at` seconds, with the quality and tracks Plex has selected. */
+  /** Decides how to play the current source at this quality. */
+  const replan = useCallback((q: QualityChoice) => {
+    const opts: DecideOptions = forceBurn.current ? { forceBurn: true } : {};
+    const p = decide(source.current!, caps.current!, q, opts);
+    planRef.current = p;
+    setPlan(p);
+    return p;
+  }, []);
+
+  /** Recomputes the source for the picked tracks. */
+  const resource = useCallback((pi: WebPlaybackInfo) => {
+    source.current = sourceFor(pi, tracks.current.audio, tracks.current.sub);
+  }, []);
+
+  const startRef = useRef<(p: PlaybackPlan, at: number, fresh?: boolean) => void>(() => {});
+
+  /** Plays `p` from `at` seconds. `fresh` is a start the viewer asked for, not a fallback. */
   const startStream = useCallback(
-    (q: WebQuality, at: number) => {
+    (p: PlaybackPlan, at: number, fresh = true) => {
       const v = video.current;
-      if (!v) return;
+      const src = source.current;
+      const c = caps.current;
+      if (!v || !src || !c) return;
       stopStream();
+      const token = ++startId.current;
+      if (fresh) failed.current.clear();
+      planRef.current = p;
+      setPlan(p);
       setBuffering(true);
       setError(null);
-      const id = crypto.randomUUID();
-      session.current = id;
-      const url = transcodeUrl(ratingKey, { maxBitrateKbps: q.kbps, resolution: q.resolution, session: id });
 
-      if (Hls.isSupported()) {
-        const h = new Hls({ startPosition: at, maxBufferLength: 60 });
-        hls.current = h;
-        let recovered = false;
-        h.on(Hls.Events.ERROR, (_e, data) => {
-          if (!data.fatal) return;
-          if (!recovered && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            recovered = true;
-            h.startLoad();
-          } else if (!recovered && data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            recovered = true;
-            h.recoverMediaError();
-          } else {
-            const status = data.response?.code ? ` (HTTP ${data.response.code})` : "";
-            setError(`Plex couldn't stream this${status}: ${data.details}`);
-          }
-        });
-        h.on(Hls.Events.MANIFEST_PARSED, () => {
-          v.play().catch(() => setPaused(true));
-        });
-        h.loadSource(url);
-        h.attachMedia(v);
-      } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
-        v.src = url;
+      /** The plan can't play: try the next one down, or show the error. */
+      const fatal = (message: string) => {
+        if (token !== startId.current) return;
+        failed.current.add(planKey(p));
+        const next = fallback(p, src, c, live.current.quality);
+        if (next && !failed.current.has(planKey(next))) {
+          flash(`${MODE_LABEL[p.mode]} failed, switching to ${MODE_LABEL[next.mode].toLowerCase()}`);
+          startRef.current(next, live.current.time || at, false);
+        } else {
+          setError(message);
+        }
+      };
+
+      if (p.mode === "directPlay") {
+        session.current = null;
+        v.src = directPlayUrl(src);
         v.addEventListener("loadedmetadata", () => (v.currentTime = at), { once: true });
         v.play().catch(() => setPaused(true));
       } else {
-        setError("This browser can't play HLS video.");
+        const id = crypto.randomUUID();
+        session.current = id;
+        const url = streamUrl(ratingKey, p, { session: id, offset: at, caps: c });
+
+        if (Hls.isSupported()) {
+          const h = new Hls({ startPosition: at, maxBufferLength: 60 });
+          hls.current = h;
+          let recovered = false;
+          h.on(Hls.Events.ERROR, (_e, data) => {
+            if (!data.fatal) return;
+            if (!recovered && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              recovered = true;
+              h.startLoad();
+            } else if (!recovered && data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              recovered = true;
+              h.recoverMediaError();
+            } else {
+              const status = data.response?.code ? ` (HTTP ${data.response.code})` : "";
+              fatal(`Plex couldn't stream this${status}: ${data.details}`);
+            }
+          });
+          h.on(Hls.Events.MANIFEST_PARSED, () => {
+            v.play().catch(() => setPaused(true));
+          });
+          h.loadSource(url);
+          h.attachMedia(v);
+        } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
+          v.src = url;
+          v.addEventListener("loadedmetadata", () => (v.currentTime = at), { once: true });
+          v.play().catch(() => setPaused(true));
+        } else {
+          fatal("This browser can't play HLS video.");
+          return;
+        }
+      }
+
+      if (p.subtitles.kind === "sidecar") {
+        attachSubtitles(v, p.subtitles).then(
+          (cleanup) => {
+            if (token === startId.current) subsCleanup.current = cleanup;
+            else cleanup();
+          },
+          () => {
+            if (token !== startId.current) return;
+            forceBurn.current = true;
+            flash("Subtitles are burned in for this file");
+            startRef.current(replan(live.current.quality), live.current.time, true);
+          },
+        );
       }
     },
-    [ratingKey, stopStream],
+    [ratingKey, stopStream, flash, replan],
   );
+  startRef.current = startStream;
+
+  /** The video element failed: direct play, or native HLS (no hls.js to report it). */
+  const onVideoError = useCallback(() => {
+    const v = video.current;
+    const p = planRef.current;
+    const src = source.current;
+    const c = caps.current;
+    if (!v || !p || !src || !c || hls.current || !v.hasAttribute("src")) return;
+    failed.current.add(planKey(p));
+    const next = fallback(p, src, c, live.current.quality);
+    if (next && !failed.current.has(planKey(next))) {
+      flash(`${MODE_LABEL[p.mode]} failed, switching to ${MODE_LABEL[next.mode].toLowerCase()}`);
+      startRef.current(next, live.current.time, false);
+    } else {
+      setError(v.error?.message || "The browser couldn't play this file.");
+    }
+  }, [flash]);
 
   // Load the item, apply the language prefs, start streaming; tear down on close.
   useEffect(() => {
@@ -225,21 +353,26 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
 
     (async () => {
       try {
-        const [pi, prefs] = await Promise.all([getPlaybackInfo(ratingKey, playlist), loadPrefs()]);
+        const [pi, prefs, detected] = await Promise.all([getPlaybackInfo(ratingKey, playlist), loadPrefs(), detectCaps()]);
         if (disposed) return;
         setInfo(pi);
-        const tracks = initialTracks(pi, prefs);
+        const picked = initialTracks(pi, prefs);
         const plexAudio = pi.audioStreams.find((s) => s.selected)?.id;
         const plexSub = pi.subtitleStreams.find((s) => s.selected)?.id ?? 0;
-        if (tracks.audio !== plexAudio || tracks.sub !== plexSub) {
-          await selectStreams(pi.partId, { audioStreamID: tracks.audio, subtitleStreamID: tracks.sub }).catch(() => {});
+        if (picked.audio !== plexAudio || picked.sub !== plexSub) {
+          await selectStreams(pi.partId, { audioStreamID: picked.audio, subtitleStreamID: picked.sub }).catch(() => {});
         }
-        setAudioId(tracks.audio);
-        setSubId(tracks.sub);
-        const q = WEB_QUALITIES.find((q) => q.label === prefs.quality) ?? WEB_QUALITIES[0];
-        setQuality(q);
         if (disposed) return;
-        startStream(q, resume ? pi.viewOffsetMs / 1000 : 0);
+        setAudioId(picked.audio);
+        setSubId(picked.sub);
+        tracks.current = { audio: picked.audio, sub: picked.sub };
+        const q = QUALITY_CHOICES.find((q) => q.label === prefs.quality) ?? QUALITY_CHOICES[0];
+        setQuality(q);
+        live.current.quality = q;
+        caps.current = detected;
+        forceBurn.current = false;
+        resource(pi);
+        startStream(replan(q), resume ? pi.viewOffsetMs / 1000 : 0);
       } catch (e) {
         if (!disposed) setError(errorMessage(e));
       }
@@ -254,13 +387,14 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
 
     return () => {
       disposed = true;
+      startId.current++;
       window.removeEventListener("pagehide", onHide);
       if (finished.current) live.current.time = live.current.duration;
       report("stopped");
       stopStream();
       document.documentElement.classList.remove("playing");
     };
-  }, [ratingKey, resume, report, startStream, stopStream, playlist]);
+  }, [ratingKey, resume, report, startStream, stopStream, replan, resource, playlist]);
 
   // Keep Plex's Continue Watching in step while playing.
   useEffect(() => {
@@ -319,12 +453,13 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   }, [upNext, paused, finish]);
 
   const changeQuality = useCallback(
-    (q: WebQuality) => {
-      if (q.label === live.current.quality.label) return;
+    (q: QualityChoice) => {
+      if (q.label === live.current.quality.label || !source.current || !caps.current) return;
       setQuality(q);
-      startStream(q, live.current.time);
+      live.current.quality = q;
+      startStream(replan(q), live.current.time);
     },
-    [startStream],
+    [startStream, replan],
   );
 
   // Plex picks the tracks on the server, so a change restarts the stream.
@@ -334,14 +469,23 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       if (!pi) return;
       try {
         await selectStreams(pi.partId, patch);
-        if (patch.audioStreamID !== undefined) setAudioId(patch.audioStreamID);
-        if (patch.subtitleStreamID !== undefined) setSubId(patch.subtitleStreamID);
-        startStream(live.current.quality, live.current.time);
+        if (patch.audioStreamID !== undefined) {
+          setAudioId(patch.audioStreamID);
+          tracks.current.audio = patch.audioStreamID;
+        }
+        if (patch.subtitleStreamID !== undefined) {
+          setSubId(patch.subtitleStreamID);
+          tracks.current.sub = patch.subtitleStreamID;
+          forceBurn.current = false;
+        }
+        if (!caps.current) return;
+        resource(pi);
+        startStream(replan(live.current.quality), live.current.time);
       } catch (e) {
         flash(`Couldn't change track: ${errorMessage(e)}`);
       }
     },
-    [startStream, flash],
+    [startStream, replan, resource, flash],
   );
 
   const poke = useCallback(() => {
@@ -397,6 +541,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         case "f":
           toggleFullscreen();
           break;
+        case "i":
+          setStats((on) => !on);
+          break;
         case "Escape":
           // In fullscreen the browser takes Escape itself to leave it.
           if (!document.fullscreenElement) onClose();
@@ -425,6 +572,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
           // playback moving on with data ahead means it isn't buffering.
           if (!v.paused && !v.seeking && v.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) setBuffering(false);
         }}
+        onError={onVideoError}
         onPlay={() => setPaused(false)}
         onPause={() => setPaused(true)}
         onWaiting={() => setBuffering(true)}
@@ -458,6 +606,16 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
           <Loader2 className="size-12 animate-spin text-white/80 drop-shadow" />
         </div>
+      )}
+
+      {stats && plan && source.current && (
+        <StatsOverlay
+          plan={plan}
+          source={source.current}
+          session={session.current}
+          video={video.current}
+          onClose={() => setStats(false)}
+        />
       )}
 
       {notice && !error && (
@@ -615,14 +773,17 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" side="top">
-                <DropdownMenuLabel>Quality</DropdownMenuLabel>
-                {WEB_QUALITIES.map((q) => (
+                <DropdownMenuLabel>Quality{plan ? ` · ${MODE_LABEL[plan.mode]}` : ""}</DropdownMenuLabel>
+                {QUALITY_CHOICES.map((q) => (
                   <DropdownMenuCheckItem key={q.label} checked={q.label === quality.label} onSelect={() => changeQuality(q)}>
                     {q.name}
                   </DropdownMenuCheckItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+            <IconButton title="Stats" onClick={() => setStats((on) => !on)}>
+              <Info />
+            </IconButton>
             <IconButton title="Fullscreen (F)" onClick={toggleFullscreen}>
               {fullscreen ? <Minimize /> : <Maximize />}
             </IconButton>
