@@ -750,7 +750,7 @@ export function webImageUrl(server: ServerConnection, path: string, width: numbe
 }
 
 // ---------------------------------------------------------------------------
-// Playback URLs (WP2 owns this section)
+// Playback URLs: direct play, direct stream, transcode
 
 export interface StreamOptions {
   session: string;
