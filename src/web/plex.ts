@@ -760,21 +760,115 @@ export interface StreamOptions {
 }
 
 /** The file itself, for <video src> (direct play). */
-export function directPlayUrl(_source: SourceMedia): string {
-  throw new Error("WP2: not implemented");
+export function directPlayUrl(source: SourceMedia): string {
+  const server = currentServer();
+  return buildUrl(server.uri, source.partKey, {}, server.token);
 }
 
-/** An HLS URL for directStream or transcode plans. */
-export function streamUrl(_ratingKey: string, _plan: PlaybackPlan, _opts: StreamOptions): string {
-  throw new Error("WP2: not implemented");
+/**
+ * The X-Plex-Client-Profile-Extra value for an HLS start request. Pure, so it
+ * can be unit-tested. Pieces are joined with "+".
+ */
+export function clientProfileExtra(plan: PlaybackPlan, caps: BrowserCaps): string {
+  const direct = plan.mode === "directStream";
+  const audio: string[] = [];
+  for (const c of [plan.audioCodecOut, "aac"]) if (caps.audioCodecs.has(c) && !audio.includes(c)) audio.push(c);
+  const container = direct ? "mp4" : "mpegts";
+  const video = direct ? plan.videoCodecOut : "h264";
+  const pieces = [
+    `add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=${container}&videoCodec=${video}&audioCodec=${audio.join(",")}&replace=true)`,
+    "add-limitation(scope=videoCodec&scopeName=h264&type=upperBound&name=video.level&value=52)",
+  ];
+  if (!direct) {
+    pieces.push(
+      `add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.width&value=${plan.maxWidth})`,
+      `add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.height&value=${plan.maxHeight})`,
+    );
+  }
+  if (plan.videoCodecOut === "hevc") {
+    pieces.push(
+      `add-limitation(scope=videoCodec&scopeName=hevc&type=upperBound&name=video.bitDepth&value=${caps.tenBit ? 10 : 8})`,
+    );
+  }
+  pieces.push("add-limitation(scope=videoAudioCodec&scopeName=aac&type=upperBound&name=audio.channels&value=6)");
+  return pieces.join("+");
 }
 
-/** The subtitle stream's text as Plex stores it (SRT, WebVTT or ASS/SSA); the caller converts. */
-export function subtitleUrl(_streamId: number, _format: "vtt" | "ass", _external: boolean): string {
-  throw new Error("WP2: not implemented");
+/**
+ * An HLS URL for directStream or transcode plans.
+ *
+ * NOTE: the fragmented-MP4 HLS form used for direct stream (container=mp4) is
+ * untested against a real server yet.
+ */
+export function streamUrl(ratingKey: string, plan: PlaybackPlan, opts: StreamOptions): string {
+  const server = currentServer();
+  const direct = plan.mode === "directStream";
+  return buildUrl(
+    server.uri,
+    "/video/:/transcode/universal/start.m3u8",
+    {
+      path: `/library/metadata/${ratingKey}`,
+      mediaIndex: 0,
+      partIndex: 0,
+      protocol: "hls",
+      fastSeek: 1,
+      directPlay: 0,
+      directStream: direct ? 1 : 0,
+      directStreamAudio: 1,
+      hasMDE: 1,
+      location: server.local ? "lan" : "wan",
+      offset: 0,
+      autoAdjustQuality: 0,
+      videoQuality: 100,
+      // A direct stream gets a bitrate cap no file reaches, so Plex never re-encodes the video.
+      maxVideoBitrate: direct ? 200000 : (plan.maxBitrateKbps ?? 40_000),
+      videoResolution: `${plan.maxWidth}x${plan.maxHeight}`,
+      subtitles: plan.subtitles.kind === "burn" ? "burn" : "none",
+      subtitleSize: 100,
+      session: opts.session,
+      "X-Plex-Session-Identifier": opts.session,
+      "X-Plex-Client-Profile-Extra": clientProfileExtra(plan, opts.caps),
+    },
+    server.token,
+  );
+}
+
+/**
+ * The subtitle stream's text as Plex stores it (SRT, WebVTT or ASS/SSA); the
+ * caller converts. Plex serves external subtitles here; embedded text ones may
+ * or may not work, so the caller falls back to burning on failure.
+ */
+export function subtitleUrl(streamId: number, _format: "vtt" | "ass", _external: boolean): string {
+  const server = currentServer();
+  return buildUrl(server.uri, `/library/streams/${streamId}`, { encoding: "utf-8" }, server.token);
 }
 
 /** This session's entry in `/transcode/sessions`, or null when Plex has none (direct play). */
-export async function transcodeSessionInfo(_session: string): Promise<TranscodeSessionInfo | null> {
-  throw new Error("WP2: not implemented");
+export async function transcodeSessionInfo(session: string): Promise<TranscodeSessionInfo | null> {
+  const server = currentServer();
+  const body = await request<{ MediaContainer?: { TranscodeSession?: Array<Record<string, unknown>> } }>(
+    buildUrl(server.uri, "/transcode/sessions", {}, server.token),
+  );
+  const list = body.MediaContainer?.TranscodeSession ?? [];
+  const key = (t: Record<string, unknown>) => String(t.key ?? "");
+  const hit = list.find((t) => key(t).endsWith(`/${session}`)) ?? list.find((t) => key(t).includes(session));
+  if (!hit) return null;
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+  const bool = (v: unknown) => (typeof v === "boolean" ? v : v === 1 || v === "1" ? true : v === 0 || v === "0" ? false : undefined);
+  return {
+    videoDecision: str(hit.videoDecision) ?? "",
+    audioDecision: str(hit.audioDecision) ?? "",
+    subtitleDecision: str(hit.subtitleDecision),
+    sourceVideoCodec: str(hit.sourceVideoCodec),
+    videoCodec: str(hit.videoCodec),
+    audioCodec: str(hit.audioCodec),
+    width: num(hit.width),
+    height: num(hit.height),
+    speed: num(hit.speed),
+    throttled: bool(hit.throttled),
+    transcodeHwRequested: bool(hit.transcodeHwRequested),
+    transcodeHwFullPipeline: bool(hit.transcodeHwFullPipeline),
+    progress: num(hit.progress),
+  };
 }
