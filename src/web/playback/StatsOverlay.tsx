@@ -9,6 +9,10 @@ export interface StatsOverlayProps {
   /** Plex transcode session id; null in direct play. */
   session: string | null;
   video: HTMLVideoElement | null;
+  /** What the stream is doing right now, e.g. "3 segments loaded". */
+  status?: string | null;
+  /** The player's last stream error, if any. */
+  lastError?: string | null;
   onClose: () => void;
 }
 
@@ -167,7 +171,7 @@ function Row({ label, value }: { label: string; value: ReactNode }) {
 }
 
 /** "Stats for nerds": how this file is playing and why. */
-export function StatsOverlay({ plan, source, session, video, onClose }: StatsOverlayProps) {
+export function StatsOverlay({ plan, source, session, video, status, lastError, onClose }: StatsOverlayProps) {
   const plex = usePlexStats(session);
   const player = usePlayerStats(video);
 
@@ -219,8 +223,14 @@ export function StatsOverlay({ plan, source, session, video, onClose }: StatsOve
           <Row label="Subtitles" value={subtitleText(plan.subtitles)} />
         </Section>
 
+        <Section title="Stream">
+          <Row label="Status" value={status ?? "—"} />
+          {lastError && <Row label="Last error" value={lastError} />}
+        </Section>
+
         {session !== null && (
           <Section title="Plex">
+            {!plex && <Row label="Session" value="not running on Plex" />}
             <Row label="Video" value={plex?.videoDecision ?? "—"} />
             <Row label="Audio" value={plex?.audioDecision ?? "—"} />
             <Row label="Output" value={plexOutput(plex)} />

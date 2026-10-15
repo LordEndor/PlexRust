@@ -770,21 +770,18 @@ export function directPlayUrl(source: SourceMedia): string {
  * can be unit-tested. Pieces are joined with "+".
  */
 export function clientProfileExtra(plan: PlaybackPlan, caps: BrowserCaps): string {
-  const direct = plan.mode === "directStream";
+  // A transcode asks for exactly what the player always asked for before
+  // direct play existed: H.264 and AAC/MP3 in MPEG-TS, which Plex and hls.js
+  // are known to handle. hls.js can't read E-AC-3 in MPEG-TS.
+  if (plan.mode !== "directStream") {
+    return "add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac,mp3)";
+  }
   const audio: string[] = [];
   for (const c of [plan.audioCodecOut, "aac"]) if (caps.audioCodecs.has(c) && !audio.includes(c)) audio.push(c);
-  const container = direct ? "mp4" : "mpegts";
-  const video = direct ? plan.videoCodecOut : "h264";
   const pieces = [
-    `add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=${container}&videoCodec=${video}&audioCodec=${audio.join(",")}&replace=true)`,
+    `add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mp4&videoCodec=${plan.videoCodecOut}&audioCodec=${audio.join(",")}&replace=true)`,
     "add-limitation(scope=videoCodec&scopeName=h264&type=upperBound&name=video.level&value=52)",
   ];
-  if (!direct) {
-    pieces.push(
-      `add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.width&value=${plan.maxWidth})`,
-      `add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.height&value=${plan.maxHeight})`,
-    );
-  }
   if (plan.videoCodecOut === "hevc") {
     pieces.push(
       `add-limitation(scope=videoCodec&scopeName=hevc&type=upperBound&name=video.bitDepth&value=${caps.tenBit ? 10 : 8})`,

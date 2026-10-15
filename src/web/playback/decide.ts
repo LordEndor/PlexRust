@@ -66,15 +66,19 @@ function transcodeReasons(source: SourceMedia, caps: BrowserCaps, quality: Quali
   return reasons;
 }
 
-function transcodePlan(source: SourceMedia, caps: BrowserCaps, quality: QualityChoice, subtitles: SubtitleDelivery, reasons: string[]): PlaybackPlan {
+function transcodePlan(source: SourceMedia, quality: QualityChoice, subtitles: SubtitleDelivery, reasons: string[]): PlaybackPlan {
   const original = quality.maxBitrateKbps === null;
   const width = original ? ORIGINAL_TRANSCODE_MAX.width : quality.maxWidth;
   const height = original ? ORIGINAL_TRANSCODE_MAX.height : quality.maxHeight;
+  // Plex only hands out sidecar subtitle files as text; embedded ones are
+  // burned in, which costs nothing extra when the video is re-encoded anyway.
+  if (subtitles.kind === "sidecar" && !subtitles.external) subtitles = { kind: "burn", streamId: subtitles.streamId };
   return {
     mode: "transcode",
     subtitles,
     videoCodecOut: "h264",
-    audioCodecOut: audioOut(source, caps),
+    // MPEG-TS through hls.js: AAC is the one codec that always works.
+    audioCodecOut: "aac",
     maxWidth: source.width > 0 ? Math.min(width, source.width) : width,
     maxHeight: source.height > 0 ? Math.min(height, source.height) : height,
     maxBitrateKbps: original ? ORIGINAL_TRANSCODE_MAX.kbps : quality.maxBitrateKbps,
@@ -126,7 +130,7 @@ export function decide(source: SourceMedia, caps: BrowserCaps, quality: QualityC
     return directPlayPlan(source, subtitles);
   }
   if (a.remuxable) return directStreamPlan(source, caps, subtitles, a, remuxReasons(source, caps));
-  return transcodePlan(source, caps, quality, subtitles, transcodeReasons(source, caps, quality, a));
+  return transcodePlan(source, quality, subtitles, transcodeReasons(source, caps, quality, a));
 }
 
 /** The next step down after `plan` failed to play, or null when nothing is left. */
@@ -137,7 +141,7 @@ export function fallback(plan: PlaybackPlan, source: SourceMedia, caps: BrowserC
 
   if (plan.mode === "directPlay") {
     if (a.remuxable) return directStreamPlan(source, caps, subtitles, a, ["Direct play failed: remuxing to fMP4 instead"]);
-    return transcodePlan(source, caps, quality, subtitles, ["Direct play failed: re-encoding instead", ...transcodeReasons(source, caps, quality, a)]);
+    return transcodePlan(source, quality, subtitles, ["Direct play failed: re-encoding instead", ...transcodeReasons(source, caps, quality, a)]);
   }
-  return transcodePlan(source, caps, quality, subtitles, ["Direct stream failed: re-encoding instead"]);
+  return transcodePlan(source, quality, subtitles, ["Direct stream failed: re-encoding instead"]);
 }

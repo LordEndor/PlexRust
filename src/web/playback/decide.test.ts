@@ -177,4 +177,16 @@ describe("fallback", () => {
     const plan = decide(src, chrome, original);
     expect(fallback(plan, src, chrome, original)?.subtitles).toEqual(plan.subtitles);
   });
+
+  it("burns embedded text subtitles when the video is transcoded anyway", () => {
+    const plan = decide({ ...mp4, videoCodec: "mpeg2video", subtitle: sub("srt") }, chrome, original);
+    expect(plan.mode).toBe("transcode");
+    expect(plan.subtitles).toEqual({ kind: "burn", streamId: 9 });
+    expect(plan.audioCodecOut).toBe("aac");
+  });
+
+  it("keeps external text subtitles as sidecars when transcoding", () => {
+    const plan = decide({ ...mp4, videoCodec: "mpeg2video", subtitle: sub("srt", true) }, chrome, original);
+    expect(plan.subtitles.kind).toBe("sidecar");
+  });
 });
