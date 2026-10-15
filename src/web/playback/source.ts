@@ -22,6 +22,7 @@ export function sourceFor(info: WebPlaybackInfo, audioId: number | undefined, su
     bitrateKbps: file.bitrateKbps,
     audioCodec: (audio?.codec ?? "").toLowerCase(),
     audioChannels: audio?.channels ?? 2,
+    audioIsDefault: !audio || audio.id === info.audioStreams[0]?.id,
     subtitle: sub
       ? {
           streamId: sub.id,

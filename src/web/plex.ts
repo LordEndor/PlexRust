@@ -754,7 +754,7 @@ export function webImageUrl(server: ServerConnection, path: string, width: numbe
 
 export interface StreamOptions {
   session: string;
-  /** Seconds to start the stream at. */
+  /** Seconds the player will start at. The URL keeps Plex's offset at 0; hls.js seeks (as before). */
   offset: number;
   caps: BrowserCaps;
 }
@@ -769,7 +769,7 @@ export function streamUrl(_ratingKey: string, _plan: PlaybackPlan, _opts: Stream
   throw new Error("WP2: not implemented");
 }
 
-/** A subtitle as text: WebVTT for `vtt`, the original ASS/SSA for `ass`. */
+/** The subtitle stream's text as Plex stores it (SRT, WebVTT or ASS/SSA); the caller converts. */
 export function subtitleUrl(_streamId: number, _format: "vtt" | "ass", _external: boolean): string {
   throw new Error("WP2: not implemented");
 }

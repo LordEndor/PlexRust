@@ -50,6 +50,8 @@ export interface SourceMedia {
   /** The audio stream that will play. */
   audioCodec: string;
   audioChannels: number;
+  /** The picked audio is the file's first audio track. A <video src> can only play that one. */
+  audioIsDefault: boolean;
   /** The subtitle stream that will show, or null for none. */
   subtitle: SubtitleSource | null;
 }
@@ -119,4 +121,9 @@ export interface TranscodeSessionInfo {
   transcodeHwFullPipeline?: boolean;
   /** Seconds of video transcoded ahead. */
   progress?: number;
+}
+
+export interface DecideOptions {
+  /** The sidecar subtitle failed to load: burn it in instead (forces a transcode). */
+  forceBurn?: boolean;
 }

@@ -1,8 +1,8 @@
 // WP1 owns this file.
-import type { BrowserCaps, PlaybackPlan, QualityChoice, SourceMedia } from "./types";
+import type { BrowserCaps, DecideOptions, PlaybackPlan, QualityChoice, SourceMedia } from "./types";
 
 /** The best way to play `source` in this browser at this quality. */
-export function decide(_source: SourceMedia, _caps: BrowserCaps, _quality: QualityChoice): PlaybackPlan {
+export function decide(_source: SourceMedia, _caps: BrowserCaps, _quality: QualityChoice, _opts: DecideOptions = {}): PlaybackPlan {
   throw new Error("WP1: not implemented");
 }
 
