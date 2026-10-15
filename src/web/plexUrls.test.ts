@@ -33,15 +33,14 @@ describe("clientProfileExtra", () => {
     expect(s.split("+")).toHaveLength(4);
   });
 
-  it("transcode uses mpegts h264 with size limits and dedupes audio", () => {
+  it("transcode keeps the H.264/AAC MPEG-TS profile that always worked", () => {
     const s = clientProfileExtra(
       plan({ mode: "transcode", videoCodecOut: "h264", audioCodecOut: "aac", maxWidth: 1920, maxHeight: 1080, maxBitrateKbps: 8000 }),
-      caps(),
+      caps({ audioCodecs: new Set(["aac", "eac3"]) }),
     );
-    expect(s).toContain("container=mpegts&videoCodec=h264&audioCodec=aac&replace=true");
-    expect(s).toContain("video.width&value=1920");
-    expect(s).toContain("video.height&value=1080");
-    expect(s).not.toContain("bitDepth");
+    expect(s).toBe(
+      "add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=mpegts&videoCodec=h264&audioCodec=aac,mp3)",
+    );
   });
 
   it("falls back to 8-bit HEVC and drops unsupported audio", () => {

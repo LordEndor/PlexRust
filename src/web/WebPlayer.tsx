@@ -147,6 +147,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const [notice, setNotice] = useState<string | null>(null);
   const [plan, setPlan] = useState<PlaybackPlan | null>(null);
   const [stats, setStats] = useState(false);
+  /** What the stream is doing, and its last error, for the stats panel. */
+  const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
 
   const video = useRef<HTMLVideoElement>(null);
   const hls = useRef<Hls | null>(null);
@@ -254,6 +257,8 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       setPlan(p);
       setBuffering(true);
       setError(null);
+      setStreamError(null);
+      setStreamStatus(p.mode === "directPlay" ? "Loading the file" : "Asking Plex to start the stream");
 
       /** The plan can't play: try the next one down, or show the error. */
       const fatal = (message: string) => {
@@ -283,21 +288,34 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
           hls.current = h;
           let recovered = false;
           h.on(Hls.Events.ERROR, (_e, data) => {
+            const status = data.response?.code ? ` (HTTP ${data.response.code})` : "";
+            setStreamError(`${data.details}${status}${data.fatal ? "" : " (recovered)"}`);
             if (!data.fatal) return;
-            if (!recovered && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            // A playlist that failed to load is never retried by startLoad(), so
+            // only segment errors get the one network retry.
+            const playlist =
+              data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+              data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
+              data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR ||
+              data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR ||
+              data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT;
+            if (!recovered && !playlist && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
               recovered = true;
               h.startLoad();
             } else if (!recovered && data.type === Hls.ErrorTypes.MEDIA_ERROR) {
               recovered = true;
               h.recoverMediaError();
             } else {
-              const status = data.response?.code ? ` (HTTP ${data.response.code})` : "";
               fatal(`Plex couldn't stream this${status}: ${data.details}`);
             }
           });
+          h.on(Hls.Events.MANIFEST_LOADING, () => setStreamStatus("Asking Plex for the playlist"));
           h.on(Hls.Events.MANIFEST_PARSED, () => {
+            setStreamStatus("Playlist loaded, waiting for Plex's first segment");
             v.play().catch(() => setPaused(true));
           });
+          let segments = 0;
+          h.on(Hls.Events.FRAG_LOADED, () => setStreamStatus(`${++segments} segment${segments === 1 ? "" : "s"} loaded`));
           h.loadSource(url);
           h.attachMedia(v);
         } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
@@ -614,6 +632,8 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
           source={source.current}
           session={session.current}
           video={video.current}
+          status={streamStatus}
+          lastError={streamError}
           onClose={() => setStats(false)}
         />
       )}
