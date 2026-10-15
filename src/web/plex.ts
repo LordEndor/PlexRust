@@ -21,6 +21,7 @@ import type {
 } from "@/lib/api";
 import type { Chapter, Episode, Marker, PlaybackInfo } from "@/lib/player";
 import { DEFAULT_PREFS, type Prefs } from "@/lib/prefs";
+import type { BrowserCaps, PlaybackPlan, SourceMedia, TranscodeSessionInfo } from "@/web/playback/types";
 import { serviceCommands } from "@/web/services";
 
 const PLEX_TV = "https://plex.tv";
@@ -235,6 +236,7 @@ interface RawExtras {
 interface RawPart {
   id: number;
   key: string;
+  container?: string;
   Stream?: RawStream[];
 }
 
@@ -249,6 +251,16 @@ export interface RawStream {
   selected?: boolean;
   forced?: boolean;
   channels?: number;
+  /** Video: e.g. `main 10`. */
+  profile?: string;
+  bitDepth?: number;
+  /** Video: `smpte2084` (HDR10) or `arib-std-b67` (HLG). */
+  colorTrc?: string;
+  DOVIPresent?: boolean;
+  width?: number;
+  height?: number;
+  /** Set on external (sidecar) subtitles: `/library/streams/{id}`. */
+  key?: string;
 }
 
 async function container(path: string, params: Params = {}): Promise<Container> {
@@ -373,6 +385,19 @@ export interface WebPlaybackInfo extends PlaybackInfo {
   partId: number;
   audioStreams: RawStream[];
   subtitleStreams: RawStream[];
+  /** The file's video side; `sourceFor` adds the picked audio and subtitle. */
+  file: FileInfo;
+}
+
+/** The parts of the first media version that don't depend on the picked tracks. */
+export interface FileInfo {
+  partKey: string;
+  container: string;
+  videoStream: RawStream | null;
+  videoCodec: string;
+  width: number;
+  height: number;
+  bitrateKbps: number;
 }
 
 export interface TranscodeOptions {
@@ -448,9 +473,11 @@ export function timelineUrl(ratingKey: string, state: string, timeMs: number, du
 
 async function playbackInfo(ratingKey: string, playlist?: string | null): Promise<WebPlaybackInfo> {
   const item = await metadataRaw(ratingKey);
-  const part = item.Media?.[0]?.Part?.[0];
-  if (!part?.key) throw new Error("This item has no playable file");
+  const media = item.Media?.[0];
+  const part = media?.Part?.[0];
+  if (!media || !part?.key) throw new Error("This item has no playable file");
   const streams = part.Stream ?? [];
+  const videoStream = streams.find((s) => s.streamType === 1) ?? null;
   const m = meta(item);
   const none: Neighbours = { after: [] };
   // Played from a playlist, the playlist is the queue.
@@ -483,6 +510,15 @@ async function playbackInfo(ratingKey: string, playlist?: string | null): Promis
     partId: part.id,
     audioStreams: streams.filter((s) => s.streamType === 2),
     subtitleStreams: streams.filter((s) => s.streamType === 3),
+    file: {
+      partKey: part.key,
+      container: (part.container ?? media.container ?? "").toLowerCase(),
+      videoStream,
+      videoCodec: (media.videoCodec ?? videoStream?.codec ?? "").toLowerCase(),
+      width: media.width ?? videoStream?.width ?? 0,
+      height: media.height ?? videoStream?.height ?? 0,
+      bitrateKbps: media.bitrate ?? 0,
+    },
   };
 }
 
@@ -711,4 +747,34 @@ export async function invokeWeb<T>(cmd: string, args: Args = {}): Promise<T> {
 /** Plex's image transcoder, resized to the size shown. The token rides in the URL, as in Plex Web. */
 export function webImageUrl(server: ServerConnection, path: string, width: number, height: number) {
   return buildUrl(server.uri, "/photo/:/transcode", { width, height, minSize: 1, upscale: 1, url: path }, server.token);
+}
+
+// ---------------------------------------------------------------------------
+// Playback URLs (WP2 owns this section)
+
+export interface StreamOptions {
+  session: string;
+  /** Seconds to start the stream at. */
+  offset: number;
+  caps: BrowserCaps;
+}
+
+/** The file itself, for <video src> (direct play). */
+export function directPlayUrl(_source: SourceMedia): string {
+  throw new Error("WP2: not implemented");
+}
+
+/** An HLS URL for directStream or transcode plans. */
+export function streamUrl(_ratingKey: string, _plan: PlaybackPlan, _opts: StreamOptions): string {
+  throw new Error("WP2: not implemented");
+}
+
+/** A subtitle as text: WebVTT for `vtt`, the original ASS/SSA for `ass`. */
+export function subtitleUrl(_streamId: number, _format: "vtt" | "ass", _external: boolean): string {
+  throw new Error("WP2: not implemented");
+}
+
+/** This session's entry in `/transcode/sessions`, or null when Plex has none (direct play). */
+export async function transcodeSessionInfo(_session: string): Promise<TranscodeSessionInfo | null> {
+  throw new Error("WP2: not implemented");
 }
