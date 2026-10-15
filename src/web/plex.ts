@@ -21,6 +21,7 @@ import type {
 } from "@/lib/api";
 import type { Chapter, Episode, Marker, PlaybackInfo } from "@/lib/player";
 import { DEFAULT_PREFS, type Prefs } from "@/lib/prefs";
+import type { BrowserCaps, PlaybackPlan, SourceMedia, TranscodeSessionInfo } from "@/web/playback/types";
 import { serviceCommands } from "@/web/services";
 
 const PLEX_TV = "https://plex.tv";
@@ -235,6 +236,7 @@ interface RawExtras {
 interface RawPart {
   id: number;
   key: string;
+  container?: string;
   Stream?: RawStream[];
 }
 
@@ -249,6 +251,16 @@ export interface RawStream {
   selected?: boolean;
   forced?: boolean;
   channels?: number;
+  /** Video: e.g. `main 10`. */
+  profile?: string;
+  bitDepth?: number;
+  /** Video: `smpte2084` (HDR10) or `arib-std-b67` (HLG). */
+  colorTrc?: string;
+  DOVIPresent?: boolean;
+  width?: number;
+  height?: number;
+  /** Set on external (sidecar) subtitles: `/library/streams/{id}`. */
+  key?: string;
 }
 
 async function container(path: string, params: Params = {}): Promise<Container> {
@@ -373,6 +385,19 @@ export interface WebPlaybackInfo extends PlaybackInfo {
   partId: number;
   audioStreams: RawStream[];
   subtitleStreams: RawStream[];
+  /** The file's video side; `sourceFor` adds the picked audio and subtitle. */
+  file: FileInfo;
+}
+
+/** The parts of the first media version that don't depend on the picked tracks. */
+export interface FileInfo {
+  partKey: string;
+  container: string;
+  videoStream: RawStream | null;
+  videoCodec: string;
+  width: number;
+  height: number;
+  bitrateKbps: number;
 }
 
 export interface TranscodeOptions {
@@ -448,9 +473,11 @@ export function timelineUrl(ratingKey: string, state: string, timeMs: number, du
 
 async function playbackInfo(ratingKey: string, playlist?: string | null): Promise<WebPlaybackInfo> {
   const item = await metadataRaw(ratingKey);
-  const part = item.Media?.[0]?.Part?.[0];
-  if (!part?.key) throw new Error("This item has no playable file");
+  const media = item.Media?.[0];
+  const part = media?.Part?.[0];
+  if (!media || !part?.key) throw new Error("This item has no playable file");
   const streams = part.Stream ?? [];
+  const videoStream = streams.find((s) => s.streamType === 1) ?? null;
   const m = meta(item);
   const none: Neighbours = { after: [] };
   // Played from a playlist, the playlist is the queue.
@@ -483,6 +510,15 @@ async function playbackInfo(ratingKey: string, playlist?: string | null): Promis
     partId: part.id,
     audioStreams: streams.filter((s) => s.streamType === 2),
     subtitleStreams: streams.filter((s) => s.streamType === 3),
+    file: {
+      partKey: part.key,
+      container: (part.container ?? media.container ?? "").toLowerCase(),
+      videoStream,
+      videoCodec: (media.videoCodec ?? videoStream?.codec ?? "").toLowerCase(),
+      width: media.width ?? videoStream?.width ?? 0,
+      height: media.height ?? videoStream?.height ?? 0,
+      bitrateKbps: media.bitrate ?? 0,
+    },
   };
 }
 
@@ -711,4 +747,128 @@ export async function invokeWeb<T>(cmd: string, args: Args = {}): Promise<T> {
 /** Plex's image transcoder, resized to the size shown. The token rides in the URL, as in Plex Web. */
 export function webImageUrl(server: ServerConnection, path: string, width: number, height: number) {
   return buildUrl(server.uri, "/photo/:/transcode", { width, height, minSize: 1, upscale: 1, url: path }, server.token);
+}
+
+// ---------------------------------------------------------------------------
+// Playback URLs: direct play, direct stream, transcode
+
+export interface StreamOptions {
+  session: string;
+  /** Seconds the player will start at. The URL keeps Plex's offset at 0; hls.js seeks (as before). */
+  offset: number;
+  caps: BrowserCaps;
+}
+
+/** The file itself, for <video src> (direct play). */
+export function directPlayUrl(source: SourceMedia): string {
+  const server = currentServer();
+  return buildUrl(server.uri, source.partKey, {}, server.token);
+}
+
+/**
+ * The X-Plex-Client-Profile-Extra value for an HLS start request. Pure, so it
+ * can be unit-tested. Pieces are joined with "+".
+ */
+export function clientProfileExtra(plan: PlaybackPlan, caps: BrowserCaps): string {
+  const direct = plan.mode === "directStream";
+  const audio: string[] = [];
+  for (const c of [plan.audioCodecOut, "aac"]) if (caps.audioCodecs.has(c) && !audio.includes(c)) audio.push(c);
+  const container = direct ? "mp4" : "mpegts";
+  const video = direct ? plan.videoCodecOut : "h264";
+  const pieces = [
+    `add-transcode-target(type=videoProfile&context=streaming&protocol=hls&container=${container}&videoCodec=${video}&audioCodec=${audio.join(",")}&replace=true)`,
+    "add-limitation(scope=videoCodec&scopeName=h264&type=upperBound&name=video.level&value=52)",
+  ];
+  if (!direct) {
+    pieces.push(
+      `add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.width&value=${plan.maxWidth})`,
+      `add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.height&value=${plan.maxHeight})`,
+    );
+  }
+  if (plan.videoCodecOut === "hevc") {
+    pieces.push(
+      `add-limitation(scope=videoCodec&scopeName=hevc&type=upperBound&name=video.bitDepth&value=${caps.tenBit ? 10 : 8})`,
+    );
+  }
+  pieces.push("add-limitation(scope=videoAudioCodec&scopeName=aac&type=upperBound&name=audio.channels&value=6)");
+  return pieces.join("+");
+}
+
+/**
+ * An HLS URL for directStream or transcode plans.
+ *
+ * NOTE: the fragmented-MP4 HLS form used for direct stream (container=mp4) is
+ * untested against a real server yet.
+ */
+export function streamUrl(ratingKey: string, plan: PlaybackPlan, opts: StreamOptions): string {
+  const server = currentServer();
+  const direct = plan.mode === "directStream";
+  return buildUrl(
+    server.uri,
+    "/video/:/transcode/universal/start.m3u8",
+    {
+      path: `/library/metadata/${ratingKey}`,
+      mediaIndex: 0,
+      partIndex: 0,
+      protocol: "hls",
+      fastSeek: 1,
+      directPlay: 0,
+      directStream: direct ? 1 : 0,
+      directStreamAudio: 1,
+      hasMDE: 1,
+      location: server.local ? "lan" : "wan",
+      offset: 0,
+      autoAdjustQuality: 0,
+      videoQuality: 100,
+      // A direct stream gets a bitrate cap no file reaches, so Plex never re-encodes the video.
+      maxVideoBitrate: direct ? 200000 : (plan.maxBitrateKbps ?? 40_000),
+      videoResolution: `${plan.maxWidth}x${plan.maxHeight}`,
+      subtitles: plan.subtitles.kind === "burn" ? "burn" : "none",
+      subtitleSize: 100,
+      session: opts.session,
+      "X-Plex-Session-Identifier": opts.session,
+      "X-Plex-Client-Profile-Extra": clientProfileExtra(plan, opts.caps),
+    },
+    server.token,
+  );
+}
+
+/**
+ * The subtitle stream's text as Plex stores it (SRT, WebVTT or ASS/SSA); the
+ * caller converts. Plex serves external subtitles here; embedded text ones may
+ * or may not work, so the caller falls back to burning on failure.
+ */
+export function subtitleUrl(streamId: number, _format: "vtt" | "ass", _external: boolean): string {
+  const server = currentServer();
+  return buildUrl(server.uri, `/library/streams/${streamId}`, { encoding: "utf-8" }, server.token);
+}
+
+/** This session's entry in `/transcode/sessions`, or null when Plex has none (direct play). */
+export async function transcodeSessionInfo(session: string): Promise<TranscodeSessionInfo | null> {
+  const server = currentServer();
+  const body = await request<{ MediaContainer?: { TranscodeSession?: Array<Record<string, unknown>> } }>(
+    buildUrl(server.uri, "/transcode/sessions", {}, server.token),
+  );
+  const list = body.MediaContainer?.TranscodeSession ?? [];
+  const key = (t: Record<string, unknown>) => String(t.key ?? "");
+  const hit = list.find((t) => key(t).endsWith(`/${session}`)) ?? list.find((t) => key(t).includes(session));
+  if (!hit) return null;
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+  const bool = (v: unknown) => (typeof v === "boolean" ? v : v === 1 || v === "1" ? true : v === 0 || v === "0" ? false : undefined);
+  return {
+    videoDecision: str(hit.videoDecision) ?? "",
+    audioDecision: str(hit.audioDecision) ?? "",
+    subtitleDecision: str(hit.subtitleDecision),
+    sourceVideoCodec: str(hit.sourceVideoCodec),
+    videoCodec: str(hit.videoCodec),
+    audioCodec: str(hit.audioCodec),
+    width: num(hit.width),
+    height: num(hit.height),
+    speed: num(hit.speed),
+    throttled: bool(hit.throttled),
+    transcodeHwRequested: bool(hit.transcodeHwRequested),
+    transcodeHwFullPipeline: bool(hit.transcodeHwFullPipeline),
+    progress: num(hit.progress),
+  };
 }

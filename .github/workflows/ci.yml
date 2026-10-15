@@ -37,6 +37,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Test web player logic
+        run: pnpm test
+
+      - name: Build browser version
+        run: pnpm build:web
+
       - name: Fetch mpv for Windows
         shell: pwsh
         env:
