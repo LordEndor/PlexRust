@@ -23,15 +23,21 @@ use serde_json::{Map, Value};
 pub enum Error {
     #[error("couldn't reach qBittorrent: {0}")]
     Http(reqwest::Error),
-    #[error("qBittorrent didn't accept the username or password")]
+    #[error(
+        "qBittorrent didn't accept the username or password. Check them in qBittorrent under Tools, Options, Web UI. A new install has no admin/adminadmin login: it prints a temporary password in its log."
+    )]
     BadLogin,
     #[error(
         "qBittorrent asks for a username and password. Enter the ones for its Web UI (Tools, Options, Web UI)."
     )]
     NeedsLogin,
-    #[error("qBittorrent accepted the login but then refused the session. Check that the address is qBittorrent's own Web UI and not a proxy that drops cookies.")]
+    #[error(
+        "qBittorrent accepted the login but then refused the session. Check that the address is qBittorrent's own Web UI and not a proxy that drops cookies."
+    )]
     SessionRefused,
-    #[error("qBittorrent has blocked this computer after too many wrong passwords. Wait a while, or restart qBittorrent.")]
+    #[error(
+        "qBittorrent has blocked this computer after too many wrong passwords. Wait a while, or restart qBittorrent."
+    )]
     Banned,
     #[error("qBittorrent rejected the request ({status}): {message}")]
     Status { status: StatusCode, message: String },
@@ -178,30 +184,52 @@ impl Sync {
                 }
             }
         }
-        for hash in v["torrents_removed"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        for hash in v["torrents_removed"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
             self.torrents.remove(&hash.to_ascii_lowercase());
         }
         if let Some(state) = v["server_state"].as_object() {
-            self.server_state.extend(state.iter().map(|(k, v)| (k.clone(), v.clone())));
+            self.server_state
+                .extend(state.iter().map(|(k, v)| (k.clone(), v.clone())));
         }
         if let Some(cats) = v["categories"].as_object() {
             self.categories.extend(cats.keys().map(|k| (k.clone(), ())));
         }
-        for name in v["categories_removed"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        for name in v["categories_removed"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
             self.categories.remove(name);
         }
     }
 
     pub fn snapshot(&self) -> Snapshot {
-        let mut torrents: Vec<Torrent> = self.torrents.iter().map(|(hash, t)| torrent(hash, t)).collect();
-        torrents.sort_by(|a, b| b.added_on.cmp(&a.added_on).then_with(|| a.name.cmp(&b.name)));
+        let mut torrents: Vec<Torrent> = self
+            .torrents
+            .iter()
+            .map(|(hash, t)| torrent(hash, t))
+            .collect();
+        torrents.sort_by(|a, b| {
+            b.added_on
+                .cmp(&a.added_on)
+                .then_with(|| a.name.cmp(&b.name))
+        });
         let s = &self.server_state;
         Snapshot {
             transfer: Transfer {
                 dl_speed: num(s.get("dl_info_speed")),
                 up_speed: num(s.get("up_info_speed")),
                 free_space: s.get("free_space_on_disk").and_then(Value::as_u64),
-                alt_speed: s.get("use_alt_speed_limits").and_then(Value::as_bool).unwrap_or(false),
+                alt_speed: s
+                    .get("use_alt_speed_limits")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             },
             categories: self.categories.keys().cloned().collect(),
             torrents,
@@ -210,24 +238,44 @@ impl Sync {
 }
 
 fn num(v: Option<&Value>) -> u64 {
-    v.and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f.max(0.0) as u64))).unwrap_or(0)
+    v.and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f.max(0.0) as u64)))
+        .unwrap_or(0)
 }
 
 fn torrent(hash: &str, t: &Map<String, Value>) -> Torrent {
-    let raw_state = t.get("state").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let raw_state = t
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     // qBittorrent says 8640000 (100 days) when it can't tell.
-    let eta = t.get("eta").and_then(Value::as_u64).filter(|e| *e < 8_640_000);
-    let completed_on = t.get("completion_on").and_then(Value::as_i64).filter(|c| *c > 0).map(|c| c as u64);
+    let eta = t
+        .get("eta")
+        .and_then(Value::as_u64)
+        .filter(|e| *e < 8_640_000);
+    let completed_on = t
+        .get("completion_on")
+        .and_then(Value::as_i64)
+        .filter(|c| *c > 0)
+        .map(|c| c as u64);
     let size = match num(t.get("size")) {
         0 => num(t.get("total_size")),
         n => n,
     };
     Torrent {
         hash: hash.to_owned(),
-        name: t.get("name").and_then(Value::as_str).unwrap_or_default().to_owned(),
+        name: t
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
         state: State::from_qbit(&raw_state),
         raw_state,
-        progress: t.get("progress").and_then(Value::as_f64).unwrap_or(0.0).clamp(0.0, 1.0),
+        progress: t
+            .get("progress")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0),
         size,
         downloaded: num(t.get("completed")),
         dl_speed: num(t.get("dlspeed")),
@@ -235,12 +283,27 @@ fn torrent(hash: &str, t: &Map<String, Value>) -> Torrent {
         eta,
         seeds: num(t.get("num_seeds")),
         peers: num(t.get("num_leechs")),
-        category: t.get("category").and_then(Value::as_str).unwrap_or_default().to_owned(),
-        ratio: t.get("ratio").and_then(Value::as_f64).unwrap_or(0.0).max(0.0),
+        category: t
+            .get("category")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        ratio: t
+            .get("ratio")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .max(0.0),
         added_on: num(t.get("added_on")),
         completed_on,
-        force_start: t.get("force_start").and_then(Value::as_bool).unwrap_or(false),
-        save_path: t.get("save_path").and_then(Value::as_str).unwrap_or_default().to_owned(),
+        force_start: t
+            .get("force_start")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        save_path: t
+            .get("save_path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
     }
 }
 
@@ -329,7 +392,9 @@ impl QbitClient {
 
     /// Turns the alternative ("turtle") speed limits on or off.
     pub async fn toggle_alt_speed(&self) -> Result<()> {
-        self.call("POST", "/transfer/toggleSpeedLimitsMode", &[]).await.map(|_| ())
+        self.call("POST", "/transfer/toggleSpeedLimitsMode", &[])
+            .await
+            .map(|_| ())
     }
 
     /// One call, signing in first if there's no session yet, and once more
@@ -374,7 +439,10 @@ impl QbitClient {
                 Err(Error::NeedsLogin)
             }
             StatusCode::NOT_FOUND => Err(Error::NotQbit),
-            status => Err(Error::Status { status, message: text.chars().take(200).collect() }),
+            status => Err(Error::Status {
+                status,
+                message: text.chars().take(200).collect(),
+            }),
         }
     }
 
@@ -384,7 +452,10 @@ impl QbitClient {
             .post(format!("{}/auth/login", self.api))
             .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
             .header(REFERER, &self.origin)
-            .body(encode(&[("username", &self.username), ("password", &self.password)]))
+            .body(encode(&[
+                ("username", &self.username),
+                ("password", &self.password),
+            ]))
             .send()
             .await
             .map_err(Error::Http)?;
@@ -403,6 +474,9 @@ impl QbitClient {
         let text = resp.text().await.map_err(Error::Http)?;
         match status {
             StatusCode::FORBIDDEN => Err(Error::Banned),
+            // qBittorrent 5.2 answers a wrong username or password with 401
+            // instead of "Fails.".
+            StatusCode::UNAUTHORIZED => Err(Error::BadLogin),
             StatusCode::NOT_FOUND => Err(Error::NotQbit),
             s if s.is_success() => match sid {
                 Some(sid) if !sid.ends_with('=') => {
@@ -414,7 +488,10 @@ impl QbitClient {
                 // "Ok." with no new cookie: this network skips the password.
                 _ => Ok(()),
             },
-            status => Err(Error::Status { status, message: text.chars().take(200).collect() }),
+            status => Err(Error::Status {
+                status,
+                message: text.chars().take(200).collect(),
+            }),
         }
     }
 }
@@ -431,13 +508,19 @@ fn encode(params: &[(&str, &str)]) -> String {
     fn escape(s: &str) -> String {
         s.bytes()
             .map(|b| match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'*' => (b as char).to_string(),
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'*' => {
+                    (b as char).to_string()
+                }
                 b' ' => "+".to_owned(),
                 b => format!("%{b:02X}"),
             })
             .collect()
     }
-    params.iter().map(|(k, v)| format!("{}={}", escape(k), escape(v))).collect::<Vec<_>>().join("&")
+    params
+        .iter()
+        .map(|(k, v)| format!("{}={}", escape(k), escape(v)))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 /// Adds `http://` when missing and drops a trailing `/` or `/api/v2`.
@@ -469,14 +552,23 @@ mod tests {
 
     #[test]
     fn normalizes_addresses() {
-        assert_eq!(normalize_url("192.168.1.109:8888/").unwrap(), "http://192.168.1.109:8888");
-        assert_eq!(normalize_url("https://nas/qbit/api/v2").unwrap(), "https://nas/qbit");
+        assert_eq!(
+            normalize_url("192.168.1.109:8888/").unwrap(),
+            "http://192.168.1.109:8888"
+        );
+        assert_eq!(
+            normalize_url("https://nas/qbit/api/v2").unwrap(),
+            "https://nas/qbit"
+        );
         assert!(normalize_url("").is_err());
     }
 
     #[test]
     fn encodes_forms() {
-        assert_eq!(encode(&[("username", "al bin"), ("password", "p&ss=1é")]), "username=al+bin&password=p%26ss%3D1%C3%A9");
+        assert_eq!(
+            encode(&[("username", "al bin"), ("password", "p&ss=1é")]),
+            "username=al+bin&password=p%26ss%3D1%C3%A9"
+        );
     }
 
     #[test]
@@ -522,7 +614,12 @@ mod tests {
 
     #[test]
     fn unknown_eta_is_none() {
-        let t = torrent("x", json!({"eta": 8640000, "state": "uploading"}).as_object().unwrap());
+        let t = torrent(
+            "x",
+            json!({"eta": 8640000, "state": "uploading"})
+                .as_object()
+                .unwrap(),
+        );
         assert_eq!(t.eta, None);
         assert_eq!(t.state, State::Seeding);
     }
