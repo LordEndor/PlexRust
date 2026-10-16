@@ -13,6 +13,8 @@ struct Fake {
     logins: u32,
     /// Requests that reached an action, as `path?body`.
     actions: Vec<String>,
+    /// Answer a wrong password with 401, as qBittorrent 5.2 does.
+    unauthorized_on_bad_login: bool,
 }
 
 async fn serve(api: &'static str, fake: Arc<Mutex<Fake>>) -> String {
@@ -40,7 +42,11 @@ async fn serve_with(api: &'static str, cookie: &'static str, fake: Arc<Mutex<Fak
                     if let Some(end) = text.find("\r\n\r\n") {
                         let len = text[..end]
                             .lines()
-                            .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length: ").map(|v| v.trim().parse::<usize>().unwrap()))
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length: ")
+                                    .map(|v| v.trim().parse::<usize>().unwrap())
+                            })
                             .unwrap_or(0);
                         if buf.len() >= end + 4 + len {
                             break;
@@ -55,14 +61,18 @@ async fn serve_with(api: &'static str, cookie: &'static str, fake: Arc<Mutex<Fak
                 let mut extra = String::new();
                 let (status, reply) = {
                     let mut f = fake.lock().unwrap();
-                    let valid = format!("cookie: {}=s{}\r\n", cookie.to_ascii_lowercase(), f.logins);
+                    let valid =
+                        format!("cookie: {}=s{}\r\n", cookie.to_ascii_lowercase(), f.logins);
                     if !lower.contains("referer: http://127.0.0.1") {
                         ("401 Unauthorized", String::new())
                     } else if path == "/qb/api/v2/auth/login" {
                         if body == "username=albin&password=p%26ss" {
                             f.logins += 1;
-                            extra = format!("Set-Cookie: {cookie}=s{}; HttpOnly; path=/\r\n", f.logins);
+                            extra =
+                                format!("Set-Cookie: {cookie}=s{}; HttpOnly; path=/\r\n", f.logins);
                             ("200 OK", "Ok.".to_owned())
+                        } else if f.unauthorized_on_bad_login {
+                            ("401 Unauthorized", "Unauthorized".to_owned())
                         } else {
                             ("200 OK", "Fails.".to_owned())
                         }
@@ -78,9 +88,15 @@ async fn serve_with(api: &'static str, cookie: &'static str, fake: Arc<Mutex<Fak
                             r#"{"rid":1,"full_update":true,"torrents":{"ABC":{"name":"Severance.S02E05","state":"stalledDL","progress":0.4,"size":100,"added_on":5}},"server_state":{"dl_info_speed":7}}"#.to_owned(),
                         )
                     } else if path == "/qb/api/v2/sync/maindata?rid=1" {
-                        ("200 OK", r#"{"rid":2,"torrents":{"ABC":{"state":"downloading"}}}"#.to_owned())
+                        (
+                            "200 OK",
+                            r#"{"rid":2,"torrents":{"ABC":{"state":"downloading"}}}"#.to_owned(),
+                        )
                     } else if path.starts_with("/qb/api/v2/torrents/") {
-                        f.actions.push(format!("{}?{body}", path.trim_start_matches("/qb/api/v2/torrents/")));
+                        f.actions.push(format!(
+                            "{}?{body}",
+                            path.trim_start_matches("/qb/api/v2/torrents/")
+                        ));
                         // The session runs out after the first action.
                         f.logins += 1;
                         ("200 OK", String::new())
@@ -122,11 +138,23 @@ async fn uses_new_names_and_signs_in_again() {
     let fake = Arc::new(Mutex::new(Fake::default()));
     let url = serve("2.11.2", fake.clone()).await;
     let client = QbitClient::new(&url, "albin", "p&ss").unwrap();
-    client.act(Action::Pause, &["abc".into(), "def".into()]).await.unwrap();
+    client
+        .act(Action::Pause, &["abc".into(), "def".into()])
+        .await
+        .unwrap();
     // The fake dropped the session; this one has to sign in again.
-    client.act(Action::DeleteWithFiles, &["abc".into()]).await.unwrap();
+    client
+        .act(Action::DeleteWithFiles, &["abc".into()])
+        .await
+        .unwrap();
     let f = fake.lock().unwrap();
-    assert_eq!(f.actions, ["stop?hashes=abc%7Cdef", "delete?hashes=abc&deleteFiles=true"]);
+    assert_eq!(
+        f.actions,
+        [
+            "stop?hashes=abc%7Cdef",
+            "delete?hashes=abc&deleteFiles=true"
+        ]
+    );
 }
 
 #[tokio::test]
@@ -146,6 +174,17 @@ async fn wrong_password() {
 }
 
 #[tokio::test]
+async fn wrong_password_on_qbittorrent_5_2() {
+    let fake = Arc::new(Mutex::new(Fake {
+        unauthorized_on_bad_login: true,
+        ..Fake::default()
+    }));
+    let url = serve("2.13.0", fake).await;
+    let client = QbitClient::new(&url, "albin", "nope").unwrap();
+    assert!(matches!(client.version().await, Err(Error::BadLogin)));
+}
+
+#[tokio::test]
 async fn no_username_when_a_password_is_needed() {
     let url = serve("2.11.2", Arc::new(Mutex::new(Fake::default()))).await;
     let client = QbitClient::new(&url, "", "").unwrap();
@@ -154,7 +193,12 @@ async fn no_username_when_a_password_is_needed() {
 
 #[tokio::test]
 async fn follows_the_port_named_cookie_of_qbittorrent_5_1() {
-    let url = serve_with("2.12.0", "QBT_SID_8888", Arc::new(Mutex::new(Fake::default()))).await;
+    let url = serve_with(
+        "2.12.0",
+        "QBT_SID_8888",
+        Arc::new(Mutex::new(Fake::default())),
+    )
+    .await;
     let client = QbitClient::new(&url, "albin", "p&ss").unwrap();
     assert_eq!(client.version().await.unwrap().app, "v5.0.2");
 }
