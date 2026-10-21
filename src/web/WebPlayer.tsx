@@ -40,6 +40,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { errorMessage, imageUrl } from "@/lib/api";
+import { notifyLibraryChanged } from "@/lib/changes";
 import { useNav } from "@/lib/nav";
 import { loadPrefs, usePrefs, type Prefs } from "@/lib/prefs";
 import { formatTime, playback, QUALITIES, type PlaybackState } from "@/lib/player";
@@ -208,7 +209,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     (state: PlaybackState) => {
       const { time, duration } = live.current;
       if (!duration) return;
-      playback.report(ratingKey, state, time * 1000, duration * 1000).catch(() => {});
+      const sent = playback.report(ratingKey, state, time * 1000, duration * 1000).catch(() => {});
+      // Once Plex has the final position, Home and the other screens behind the player reload it.
+      if (state === "stopped") sent.finally(notifyLibraryChanged);
     },
     [ratingKey],
   );
