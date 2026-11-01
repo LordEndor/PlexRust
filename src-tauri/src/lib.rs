@@ -2,6 +2,7 @@ mod calendar;
 mod commands;
 mod downloads;
 mod images;
+mod manage;
 mod player;
 mod requests;
 mod settings;
@@ -96,6 +97,15 @@ pub fn run() {
             player::remember_tracks,
             player::subtitle_search,
             player::subtitle_download,
+            manage::scan_library,
+            manage::refresh_item,
+            manage::analyze_item,
+            manage::delete_item,
+            manage::find_matches,
+            manage::apply_match,
+            manage::edit_item,
+            manage::item_posters,
+            manage::set_poster,
             watchlist::watchlist,
             watchlist::watchlist_set,
             watchlist::watchlist_has,

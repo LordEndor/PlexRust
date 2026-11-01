@@ -3,6 +3,7 @@ import { Bookmark, BookmarkCheck, Check, Clapperboard, Ellipsis, Play, RotateCcw
 
 import { InfoDialog } from "@/components/InfoDialog";
 import { ItemContextMenu, itemActions } from "@/components/ItemMenu";
+import { ManageDialogs } from "@/components/ManageDialogs";
 import { Poster, ProgressBar } from "@/components/Poster";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,7 @@ import { useNav } from "@/lib/nav";
 import { formatTime } from "@/lib/player";
 import { posterSize, usePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
+import type { ManageDialog } from "@/lib/manage";
 import { canWatchlist, watchlist } from "@/lib/watchlist";
 import { PlaylistView } from "@/screens/PlaylistView";
 
@@ -130,7 +132,8 @@ function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | n
     setOnList(next);
     watchlist.set(item.guid, next).catch(() => setOnList(!next));
   };
-  const actions = itemActions(item, nav, { onInfo: () => setInfo(true) }).filter(
+  const [dialog, setDialog] = useState<ManageDialog | null>(null);
+  const actions = itemActions(item, nav, { onInfo: () => setInfo(true), onManage: setDialog }).filter(
     (a) => a.label !== "Play" && a.label !== "Resume",
   );
   // What the Play button starts: the item itself, or a show's next episode.
@@ -300,6 +303,7 @@ function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | n
               </DropdownMenu>
             )}
             {info && <InfoDialog item={item} open={info} onOpenChange={setInfo} />}
+            <ManageDialogs item={item} dialog={dialog} onClose={() => setDialog(null)} leaveOnDelete />
           </div>
           {target && target !== item && (
             <p className="text-muted-foreground -mt-1 text-sm">
