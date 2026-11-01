@@ -278,6 +278,18 @@ pub async fn up_next(state: State<'_, AppState>, rating_key: String) -> CmdResul
 }
 
 #[tauri::command]
+pub async fn rate(state: State<'_, AppState>, rating_key: String, rating: Option<f64>) -> CmdResult<()> {
+    let server = current_server(&state).await?;
+    state.plex.rate(&server, &rating_key, rating).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn history(state: State<'_, AppState>, start: u32, size: u32) -> CmdResult<Vec<Metadata>> {
+    let server = current_server(&state).await?;
+    state.plex.history(&server, start, size).await.map_err(err)
+}
+
+#[tauri::command]
 pub async fn extras(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
     let server = current_server(&state).await?;
     state.plex.extras(&server, &rating_key).await.map_err(err)

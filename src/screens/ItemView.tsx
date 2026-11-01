@@ -22,6 +22,7 @@ import { episodeLabel, formatDuration, isWatched, progress, resolutionLabel } fr
 import { useNav } from "@/lib/nav";
 import { formatTime } from "@/lib/player";
 import { posterSize, usePrefs } from "@/lib/prefs";
+import { cn } from "@/lib/utils";
 import { canWatchlist, watchlist } from "@/lib/watchlist";
 import { PlaylistView } from "@/screens/PlaylistView";
 
@@ -196,6 +197,7 @@ function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | n
                 <Star className="fill-primary text-primary size-3.5" /> {rating.toFixed(1)}
               </span>
             ) : null}
+            {item.type !== "collection" && <StarRating item={item} />}
             {resolutionLabel(item) && <Badge variant="outline">{resolutionLabel(item)}</Badge>}
             {isWatched(item) && (
               <span className="flex items-center gap-1">
@@ -379,6 +381,49 @@ function Episodes({ episodes }: { episodes: Metadata[] | null }) {
         </ItemContextMenu>
       ))}
     </section>
+  );
+}
+
+/** Your own 1-5 star rating, saved to Plex (which counts two points a star). */
+function StarRating({ item }: { item: Metadata }) {
+  const [rating, setRating] = useState(item.userRating ?? null);
+  const [hover, setHover] = useState<number | null>(null);
+  useEffect(() => setRating(item.userRating ?? null), [item.ratingKey, item.userRating]);
+  const stars = hover ?? (rating != null ? rating / 2 : 0);
+
+  const rate = (n: number) => {
+    // Clicking the current rating clears it.
+    const next = rating === n * 2 ? null : n * 2;
+    const before = rating;
+    setRating(next);
+    library.rate(item.ratingKey, next).catch(() => setRating(before));
+  };
+
+  return (
+    <span
+      className="flex items-center"
+      title={rating != null ? `Your rating: ${rating / 2} of 5. Click it again to clear.` : "Rate it"}
+      onMouseLeave={() => setHover(null)}
+    >
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          aria-label={`${n} star${n > 1 ? "s" : ""}`}
+          onMouseEnter={() => setHover(n)}
+          onClick={() => rate(n)}
+          className="p-0.5"
+        >
+          <Star
+            className={cn(
+              "size-4 transition-colors",
+              n <= stars ? "fill-amber-400 text-amber-400" : "text-muted-foreground/60",
+              // Ratings from other apps can land on half stars.
+              n - 0.5 === stars && "fill-amber-400/50 text-amber-400",
+            )}
+          />
+        </button>
+      ))}
+    </span>
   );
 }
 

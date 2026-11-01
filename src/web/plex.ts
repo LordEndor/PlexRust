@@ -737,6 +737,22 @@ const commands: Record<string, Command> = {
     return !!(Array.isArray(state) ? state[0] : state)?.watchlistedAt;
   },
 
+  async rate({ ratingKey, rating }) {
+    const server = currentServer();
+    const params = { key: ratingKey as string, identifier: "com.plexapp.plugins.library", rating: rating == null ? -1 : (rating as number) };
+    await request(buildUrl(server.uri, "/:/rate", params, server.token), { method: "PUT", json: false });
+  },
+
+  async history({ start, size }): Promise<Metadata[]> {
+    const c = await container("/status/sessions/history/all", {
+      sort: "viewedAt:desc",
+      accountID: 1,
+      "X-Plex-Container-Start": start as number,
+      "X-Plex-Container-Size": size as number,
+    });
+    return (c.Metadata ?? []).map(meta);
+  },
+
   async extras({ ratingKey }): Promise<Metadata[]> {
     return ((await container(`/library/metadata/${ratingKey}/extras`)).Metadata ?? []).map(meta);
   },

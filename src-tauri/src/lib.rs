@@ -75,6 +75,8 @@ pub fn run() {
             commands::collections,
             commands::collection_items,
             commands::trailers,
+            commands::rate,
+            commands::history,
             commands::extras,
             commands::related,
             commands::person_items,

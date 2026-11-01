@@ -7,6 +7,7 @@ import {
   Compass,
   Download,
   Film,
+  History,
   Home as HomeIcon,
   Image,
   ListVideo,
@@ -33,6 +34,7 @@ import { ReadyToasts } from "@/components/ReadyToasts";
 import { useSeerrEnabled } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
 import { CalendarView } from "@/screens/CalendarView";
+import { HistoryView } from "@/screens/HistoryView";
 import { HomeView } from "@/screens/HomeView";
 import { DiscoverAllView } from "@/screens/DiscoverAllView";
 import { DiscoverView } from "@/screens/DiscoverView";
@@ -218,6 +220,13 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
             onClick={() => goRoot({ name: "watchlist" })}
           />
           <NavItem
+            icon={History}
+            label="History"
+            collapsed={collapsed}
+            active={root.name === "history"}
+            onClick={() => goRoot({ name: "history" })}
+          />
+          <NavItem
             icon={ListVideo}
             label="Playlists"
             collapsed={collapsed}
@@ -353,6 +362,8 @@ function Screen({ route }: { route: Route }) {
       return <PlaylistView ratingKey={route.ratingKey} />;
     case "watchlist":
       return <WatchlistView />;
+    case "history":
+      return <HistoryView />;
     case "person":
       return <PersonView role={route.role} id={route.id} title={route.title} thumb={route.thumb} />;
     case "player":
