@@ -23,7 +23,9 @@ impl PreviewIndex {
         if data.len() < HEADER_LEN || data[..8] != MAGIC {
             return None;
         }
-        let u32_at = |at: usize| -> Option<u32> { Some(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?)) };
+        let u32_at = |at: usize| -> Option<u32> {
+            Some(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?))
+        };
         let count = u32_at(12)? as usize;
         let interval_ms = match u32_at(16)? {
             0 => 1000,
@@ -39,7 +41,11 @@ impl PreviewIndex {
             .map(|w| (w[0], w[1]))
             .filter(|&(start, end)| start < end && end <= data.len())
             .collect();
-        (frames.len() == count).then_some(Self { interval_ms, data, frames })
+        (frames.len() == count).then_some(Self {
+            interval_ms,
+            data,
+            frames,
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -60,7 +66,11 @@ impl PreviewIndex {
 impl PlexClient {
     /// Downloads the thumbnail index for a media part. `None` when the server
     /// hasn't generated one (Plex's "video preview thumbnails" setting).
-    pub async fn preview_index(&self, server: &ServerConnection, part_id: u64) -> Result<Option<PreviewIndex>> {
+    pub async fn preview_index(
+        &self,
+        server: &ServerConnection,
+        part_id: u64,
+    ) -> Result<Option<PreviewIndex>> {
         let resp = self
             .http
             .get(format!("{}/library/parts/{part_id}/indexes/sd", server.uri))
@@ -111,12 +121,20 @@ mod tests {
 
     #[test]
     fn zero_interval_means_one_second() {
-        assert_eq!(PreviewIndex::parse(bif(&[b"x"], 0)).unwrap().interval_ms, 1000);
+        assert_eq!(
+            PreviewIndex::parse(bif(&[b"x"], 0)).unwrap().interval_ms,
+            1000
+        );
     }
 
     #[test]
     fn rejects_garbage() {
-        assert!(PreviewIndex::parse(b"not a bif file at all, just text that is long enough to pass".repeat(2)).is_none());
+        assert!(
+            PreviewIndex::parse(
+                b"not a bif file at all, just text that is long enough to pass".repeat(2)
+            )
+            .is_none()
+        );
         let mut truncated = bif(&[b"one", b"two"], 1000);
         truncated.truncate(truncated.len() - 2);
         assert!(PreviewIndex::parse(truncated).is_none());

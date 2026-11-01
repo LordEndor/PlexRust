@@ -38,7 +38,13 @@ pub struct SeerrConfig {
 /// Builds a client from what was typed (or saved) and checks it works.
 async fn open(state: &AppState, url: &str, api_key: &str) -> CmdResult<Connection> {
     let auth = if api_key.trim().is_empty() {
-        let token = state.settings.lock().await.token.clone().ok_or("Sign in to Plex first")?;
+        let token = state
+            .settings
+            .lock()
+            .await
+            .token
+            .clone()
+            .ok_or("Sign in to Plex first")?;
         Auth::Plex(token)
     } else {
         Auth::ApiKey(api_key.trim().to_owned())
@@ -101,7 +107,10 @@ pub async fn seerr_connect(
 }
 
 #[tauri::command]
-pub async fn seerr_disconnect(state: State<'_, AppState>, seerr: State<'_, SeerrState>) -> CmdResult<()> {
+pub async fn seerr_disconnect(
+    state: State<'_, AppState>,
+    seerr: State<'_, SeerrState>,
+) -> CmdResult<()> {
     seerr.forget().await;
     let mut s = state.settings.lock().await;
     s.seerr = Default::default();
@@ -109,7 +118,10 @@ pub async fn seerr_disconnect(state: State<'_, AppState>, seerr: State<'_, Seerr
 }
 
 #[tauri::command]
-pub async fn seerr_info(state: State<'_, AppState>, seerr: State<'_, SeerrState>) -> CmdResult<Info> {
+pub async fn seerr_info(
+    state: State<'_, AppState>,
+    seerr: State<'_, SeerrState>,
+) -> CmdResult<Info> {
     Ok(connection(&state, &seerr).await?.info)
 }
 
@@ -121,7 +133,10 @@ pub async fn seerr_search(
     page: Option<u32>,
 ) -> CmdResult<Value> {
     let c = connection(&state, &seerr).await?;
-    c.client.search(&query, page.unwrap_or(1)).await.map_err(err)
+    c.client
+        .search(&query, page.unwrap_or(1))
+        .await
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -132,7 +147,10 @@ pub async fn seerr_discover(
     page: Option<u32>,
 ) -> CmdResult<Value> {
     let c = connection(&state, &seerr).await?;
-    c.client.discover(&row, page.unwrap_or(1)).await.map_err(err)
+    c.client
+        .discover(&row, page.unwrap_or(1))
+        .await
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -151,7 +169,11 @@ pub async fn seerr_browse(
 }
 
 #[tauri::command]
-pub async fn seerr_genres(state: State<'_, AppState>, seerr: State<'_, SeerrState>, media_type: MediaType) -> CmdResult<Value> {
+pub async fn seerr_genres(
+    state: State<'_, AppState>,
+    seerr: State<'_, SeerrState>,
+    media_type: MediaType,
+) -> CmdResult<Value> {
     let c = connection(&state, &seerr).await?;
     c.client.genres(media_type).await.map_err(err)
 }
@@ -168,7 +190,10 @@ pub async fn seerr_details(
 }
 
 #[tauri::command]
-pub async fn seerr_quota(state: State<'_, AppState>, seerr: State<'_, SeerrState>) -> CmdResult<Value> {
+pub async fn seerr_quota(
+    state: State<'_, AppState>,
+    seerr: State<'_, SeerrState>,
+) -> CmdResult<Value> {
     let c = connection(&state, &seerr).await?;
     c.client.quota(c.info.user.id).await.map_err(err)
 }
@@ -184,13 +209,20 @@ pub async fn seerr_request(
 }
 
 #[tauri::command]
-pub async fn seerr_requests(state: State<'_, AppState>, seerr: State<'_, SeerrState>) -> CmdResult<Vec<Value>> {
+pub async fn seerr_requests(
+    state: State<'_, AppState>,
+    seerr: State<'_, SeerrState>,
+) -> CmdResult<Vec<Value>> {
     let c = connection(&state, &seerr).await?;
     c.client.requests(c.info.user.id, 50).await.map_err(err)
 }
 
 #[tauri::command]
-pub async fn seerr_cancel(state: State<'_, AppState>, seerr: State<'_, SeerrState>, request_id: u64) -> CmdResult<()> {
+pub async fn seerr_cancel(
+    state: State<'_, AppState>,
+    seerr: State<'_, SeerrState>,
+    request_id: u64,
+) -> CmdResult<()> {
     let c = connection(&state, &seerr).await?;
     c.client.cancel(request_id).await.map_err(err)
 }

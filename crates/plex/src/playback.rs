@@ -21,15 +21,25 @@ impl PlexClient {
     /// URL that streams the original file, untouched. mpv plays anything, so
     /// this is the default.
     pub fn direct_url(&self, server: &ServerConnection, part_key: &str) -> String {
-        let mut url = Url::parse(&format!("{}{part_key}", server.uri)).expect("server uri is a valid url");
-        url.query_pairs_mut().append_pair("X-Plex-Token", &server.token);
+        let mut url =
+            Url::parse(&format!("{}{part_key}", server.uri)).expect("server uri is a valid url");
+        url.query_pairs_mut()
+            .append_pair("X-Plex-Token", &server.token);
         url.into()
     }
 
     /// HLS URL for the server to transcode `rating_key` down to `opts`.
-    pub fn transcode_url(&self, server: &ServerConnection, rating_key: &str, opts: &TranscodeOptions) -> String {
-        let mut url = Url::parse(&format!("{}/video/:/transcode/universal/start.m3u8", server.uri))
-            .expect("server uri is a valid url");
+    pub fn transcode_url(
+        &self,
+        server: &ServerConnection,
+        rating_key: &str,
+        opts: &TranscodeOptions,
+    ) -> String {
+        let mut url = Url::parse(&format!(
+            "{}/video/:/transcode/universal/start.m3u8",
+            server.uri
+        ))
+        .expect("server uri is a valid url");
         let location = if server.local { "lan" } else { "wan" };
         url.query_pairs_mut()
             .append_pair("path", &format!("/library/metadata/{rating_key}"))
@@ -107,12 +117,20 @@ impl PlexClient {
     }
 
     /// Marks an item (or every episode of a show or season) watched or unwatched.
-    pub async fn set_watched(&self, server: &ServerConnection, rating_key: &str, watched: bool) -> Result<()> {
+    pub async fn set_watched(
+        &self,
+        server: &ServerConnection,
+        rating_key: &str,
+        watched: bool,
+    ) -> Result<()> {
         let action = if watched { "scrobble" } else { "unscrobble" };
         let resp = self
             .http
             .get(format!("{}/:/{action}", server.uri))
-            .query(&[("key", rating_key), ("identifier", "com.plexapp.plugins.library")])
+            .query(&[
+                ("key", rating_key),
+                ("identifier", "com.plexapp.plugins.library"),
+            ])
             .header("X-Plex-Token", &server.token)
             .send()
             .await?;
@@ -121,7 +139,11 @@ impl PlexClient {
     }
 
     /// Takes an item off Continue Watching without changing its progress.
-    pub async fn remove_from_continue_watching(&self, server: &ServerConnection, rating_key: &str) -> Result<()> {
+    pub async fn remove_from_continue_watching(
+        &self,
+        server: &ServerConnection,
+        rating_key: &str,
+    ) -> Result<()> {
         let resp = self
             .http
             .put(format!("{}/actions/removeFromContinueWatching", server.uri))

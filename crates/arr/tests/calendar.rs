@@ -44,16 +44,31 @@ async fn serve(app: &'static str) -> String {
                 }
                 let req = String::from_utf8_lossy(&buf).to_string();
                 let line = req.lines().next().unwrap_or_default().to_owned();
-                let (status, body) = if !req.to_ascii_lowercase().contains("x-api-key: secret\r\n") {
+                let (status, body) = if !req.to_ascii_lowercase().contains("x-api-key: secret\r\n")
+                {
                     ("401 Unauthorized", String::new())
                 } else if line.starts_with("GET /base/api/v3/system/status ") {
-                    ("200 OK", format!(r#"{{"appName":"{app}","version":"5.1.0"}}"#))
-                } else if line.starts_with("GET /base/api/v3/calendar?start=2026-10-01&end=2026-10-31&unmonitored=false")
-                {
-                    let body = if app == "Radarr" { RADARR_CALENDAR } else { SONARR_CALENDAR };
-                    assert_eq!(app == "Sonarr", line.contains("includeSeries=true"), "{line}");
+                    (
+                        "200 OK",
+                        format!(r#"{{"appName":"{app}","version":"5.1.0"}}"#),
+                    )
+                } else if line.starts_with(
+                    "GET /base/api/v3/calendar?start=2026-10-01&end=2026-10-31&unmonitored=false",
+                ) {
+                    let body = if app == "Radarr" {
+                        RADARR_CALENDAR
+                    } else {
+                        SONARR_CALENDAR
+                    };
+                    assert_eq!(
+                        app == "Sonarr",
+                        line.contains("includeSeries=true"),
+                        "{line}"
+                    );
                     ("200 OK", body.to_owned())
-                } else if line.starts_with("GET /base/api/v3/queue?pageSize=1000&includeSeries=true&includeEpisode=true ") {
+                } else if line.starts_with(
+                    "GET /base/api/v3/queue?pageSize=1000&includeSeries=true&includeEpisode=true ",
+                ) {
                     ("200 OK", SONARR_QUEUE.to_owned())
                 } else {
                     ("404 Not Found", format!(r#"{{"message":"{line}"}}"#))
@@ -83,7 +98,10 @@ async fn keeps_only_movie_dates_inside_the_range() {
     assert_eq!(r.date, "2026-10-20");
     assert_eq!(r.id, "radarr-7-digital");
     assert_eq!(r.runtime, None);
-    assert_eq!(r.poster.as_deref(), Some("https://image.tmdb.org/t/p/original/p.jpg"));
+    assert_eq!(
+        r.poster.as_deref(),
+        Some("https://image.tmdb.org/t/p/original/p.jpg")
+    );
 }
 
 #[tokio::test]
@@ -107,7 +125,10 @@ async fn reads_episodes_with_their_show() {
 async fn explains_bad_keys_and_swapped_servers() {
     let url = serve("Sonarr").await;
     let wrong_key = ArrClient::new(Kind::Sonarr, &url, "nope").unwrap();
-    assert!(matches!(wrong_key.status().await, Err(Error::BadKey(Kind::Sonarr))));
+    assert!(matches!(
+        wrong_key.status().await,
+        Err(Error::BadKey(Kind::Sonarr))
+    ));
 
     let swapped = ArrClient::new(Kind::Radarr, &url, "secret").unwrap();
     let err = swapped.status().await.unwrap_err();

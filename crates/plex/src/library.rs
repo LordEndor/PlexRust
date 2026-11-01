@@ -300,13 +300,21 @@ impl Filters {
 
     /// Whether `item` passes the filters Plex can't apply.
     pub fn keeps(&self, item: &Metadata) -> bool {
-        self.min_bitrate_kbps
-            .is_none_or(|min| item.media.iter().any(|m| m.bitrate.is_some_and(|b| b >= min)))
+        self.min_bitrate_kbps.is_none_or(|min| {
+            item.media
+                .iter()
+                .any(|m| m.bitrate.is_some_and(|b| b >= min))
+        })
     }
 }
 
 impl PlexClient {
-    async fn container(&self, server: &ServerConnection, path: &str, query: &[(&str, &str)]) -> Result<MediaContainer> {
+    async fn container(
+        &self,
+        server: &ServerConnection,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<MediaContainer> {
         let resp = self
             .http
             .get(format!("{}{path}", server.uri))
@@ -321,18 +329,33 @@ impl PlexClient {
     /// The home screen rows: Continue Watching, Recently Added, and so on.
     pub async fn home_hubs(&self, server: &ServerConnection) -> Result<Vec<Hub>> {
         let c = self
-            .container(server, "/hubs", &[("count", "20"), ("includeLibraryPlaylists", "0")])
+            .container(
+                server,
+                "/hubs",
+                &[("count", "20"), ("includeLibraryPlaylists", "0")],
+            )
             .await?;
         let mut hubs = c.hub;
         drop_on_deck_duplicates(&mut hubs);
-        Ok(hubs.into_iter().filter(|h| !h.metadata.is_empty()).collect())
+        Ok(hubs
+            .into_iter()
+            .filter(|h| !h.metadata.is_empty())
+            .collect())
     }
 
     /// How many items a library holds: its movies or shows, or with `kind`
     /// another Plex type, such as 4 for a show library's episodes.
-    pub async fn section_total(&self, server: &ServerConnection, section: &str, kind: Option<u8>) -> Result<u32> {
+    pub async fn section_total(
+        &self,
+        server: &ServerConnection,
+        section: &str,
+        kind: Option<u8>,
+    ) -> Result<u32> {
         let kind = kind.map(|k| k.to_string());
-        let mut query = vec![("X-Plex-Container-Start", "0"), ("X-Plex-Container-Size", "0")];
+        let mut query = vec![
+            ("X-Plex-Container-Start", "0"),
+            ("X-Plex-Container-Size", "0"),
+        ];
         if let Some(k) = &kind {
             query.push(("type", k));
         }
@@ -344,19 +367,33 @@ impl PlexClient {
 
     /// The account's video playlists.
     pub async fn playlists(&self, server: &ServerConnection) -> Result<Vec<Metadata>> {
-        let c = self.container(server, "/playlists", &[("playlistType", "video")]).await?;
+        let c = self
+            .container(server, "/playlists", &[("playlistType", "video")])
+            .await?;
         Ok(c.metadata)
     }
 
     /// One playlist's own details: title, poster, length.
-    pub async fn playlist(&self, server: &ServerConnection, playlist: &str) -> Result<Option<Metadata>> {
-        let c = self.container(server, &format!("/playlists/{playlist}"), &[]).await?;
+    pub async fn playlist(
+        &self,
+        server: &ServerConnection,
+        playlist: &str,
+    ) -> Result<Option<Metadata>> {
+        let c = self
+            .container(server, &format!("/playlists/{playlist}"), &[])
+            .await?;
         Ok(c.metadata.into_iter().next())
     }
 
     /// What's in a playlist, in its order.
-    pub async fn playlist_items(&self, server: &ServerConnection, playlist: &str) -> Result<Vec<Metadata>> {
-        let c = self.container(server, &format!("/playlists/{playlist}/items"), &[]).await?;
+    pub async fn playlist_items(
+        &self,
+        server: &ServerConnection,
+        playlist: &str,
+    ) -> Result<Vec<Metadata>> {
+        let c = self
+            .container(server, &format!("/playlists/{playlist}/items"), &[])
+            .await?;
         Ok(c.metadata)
     }
 
@@ -400,16 +437,28 @@ impl PlexClient {
             .container(server, &format!("/library/sections/{section}/all"), &query)
             .await?;
         if filters.needs_whole_library(sort) {
-            let items: Vec<Metadata> = c.metadata.into_iter().filter(|m| filters.keeps(m)).collect();
+            let items: Vec<Metadata> = c
+                .metadata
+                .into_iter()
+                .filter(|m| filters.keeps(m))
+                .collect();
             let total = items.len() as u32;
             return Ok(Page { items, total });
         }
         let total = c.total_size.or(c.size).unwrap_or(c.metadata.len() as u32);
-        Ok(Page { items: c.metadata, total })
+        Ok(Page {
+            items: c.metadata,
+            total,
+        })
     }
 
     /// Values a library can be filtered by: `genre` or `decade`.
-    pub async fn filter_values(&self, server: &ServerConnection, section: &str, field: &str) -> Result<Vec<Directory>> {
+    pub async fn filter_values(
+        &self,
+        server: &ServerConnection,
+        section: &str,
+        field: &str,
+    ) -> Result<Vec<Directory>> {
         let c = self
             .container(server, &format!("/library/sections/{section}/{field}"), &[])
             .await?;
@@ -417,41 +466,88 @@ impl PlexClient {
     }
 
     /// A library's collections.
-    pub async fn collections(&self, server: &ServerConnection, section: &str) -> Result<Vec<Metadata>> {
+    pub async fn collections(
+        &self,
+        server: &ServerConnection,
+        section: &str,
+    ) -> Result<Vec<Metadata>> {
         let c = self
-            .container(server, &format!("/library/sections/{section}/collections"), &[])
+            .container(
+                server,
+                &format!("/library/sections/{section}/collections"),
+                &[],
+            )
             .await?;
         Ok(c.metadata)
     }
 
     /// The movies or shows in a collection.
-    pub async fn collection_items(&self, server: &ServerConnection, collection: &str) -> Result<Vec<Metadata>> {
+    pub async fn collection_items(
+        &self,
+        server: &ServerConnection,
+        collection: &str,
+    ) -> Result<Vec<Metadata>> {
         let c = self
-            .container(server, &format!("/library/collections/{collection}/children"), &[])
+            .container(
+                server,
+                &format!("/library/collections/{collection}/children"),
+                &[],
+            )
             .await?;
         Ok(c.metadata)
     }
 
     /// An item's trailers, from its extras.
-    pub async fn trailers(&self, server: &ServerConnection, rating_key: &str) -> Result<Vec<Metadata>> {
+    pub async fn trailers(
+        &self,
+        server: &ServerConnection,
+        rating_key: &str,
+    ) -> Result<Vec<Metadata>> {
         let c = self
-            .container(server, &format!("/library/metadata/{rating_key}/extras"), &[])
+            .container(
+                server,
+                &format!("/library/metadata/{rating_key}/extras"),
+                &[],
+            )
             .await?;
-        Ok(c.metadata.into_iter().filter(|m| m.extra_type == Some(1)).collect())
+        Ok(c.metadata
+            .into_iter()
+            .filter(|m| m.extra_type == Some(1))
+            .collect())
     }
 
     /// Full details for one item, including cast, genres and media info.
-    pub async fn metadata(&self, server: &ServerConnection, rating_key: &str) -> Result<Option<Metadata>> {
+    pub async fn metadata(
+        &self,
+        server: &ServerConnection,
+        rating_key: &str,
+    ) -> Result<Option<Metadata>> {
         let c = self
-            .container(server, &format!("/library/metadata/{rating_key}"), &[("includeMarkers", "1"), ("includeChapters", "1"), ("includeGuids", "1")])
+            .container(
+                server,
+                &format!("/library/metadata/{rating_key}"),
+                &[
+                    ("includeMarkers", "1"),
+                    ("includeChapters", "1"),
+                    ("includeGuids", "1"),
+                ],
+            )
             .await?;
         Ok(c.metadata.into_iter().next())
     }
 
     /// Seasons of a show, or episodes of a season.
-    pub async fn children(&self, server: &ServerConnection, rating_key: &str) -> Result<Vec<Metadata>> {
+    pub async fn children(
+        &self,
+        server: &ServerConnection,
+        rating_key: &str,
+    ) -> Result<Vec<Metadata>> {
         let c = self
-            .container(server, &format!("/library/metadata/{rating_key}/children"), &[])
+            .container(
+                server,
+                &format!("/library/metadata/{rating_key}/children"),
+                &[],
+            )
             .await?;
         Ok(c.metadata)
     }
@@ -475,7 +571,11 @@ impl PlexClient {
     }
 
     /// The episode a Play button on a show or season page should start.
-    pub async fn up_next(&self, server: &ServerConnection, item: &Metadata) -> Result<Option<Metadata>> {
+    pub async fn up_next(
+        &self,
+        server: &ServerConnection,
+        item: &Metadata,
+    ) -> Result<Option<Metadata>> {
         let path = match item.kind.as_str() {
             "show" => format!("/library/metadata/{}/allLeaves", item.rating_key),
             "season" => format!("/library/metadata/{}/children", item.rating_key),
@@ -488,7 +588,10 @@ impl PlexClient {
         let c = self
             .container(server, "/hubs/search", &[("query", query), ("limit", "12")])
             .await?;
-        Ok(c.hub.into_iter().filter(|h| !h.metadata.is_empty()).collect())
+        Ok(c.hub
+            .into_iter()
+            .filter(|h| !h.metadata.is_empty())
+            .collect())
     }
 }
 
@@ -507,7 +610,11 @@ fn drop_on_deck_duplicates(hubs: &mut [Hub]) {
         .collect();
     for hub in hubs.iter_mut().filter(|h| id(h).contains("ondeck")) {
         hub.metadata.retain(|m| {
-            !keys.contains(&m.rating_key) && !m.grandparent_rating_key.as_ref().is_some_and(|g| keys.contains(g))
+            !keys.contains(&m.rating_key)
+                && !m
+                    .grandparent_rating_key
+                    .as_ref()
+                    .is_some_and(|g| keys.contains(g))
         });
     }
 }
@@ -565,10 +672,19 @@ mod tests {
     #[test]
     fn bitrate_filter_keeps_any_fast_version() {
         let item = |rates: &[u32]| Metadata {
-            media: rates.iter().map(|&b| Media { bitrate: Some(b), ..Default::default() }).collect(),
+            media: rates
+                .iter()
+                .map(|&b| Media {
+                    bitrate: Some(b),
+                    ..Default::default()
+                })
+                .collect(),
             ..Default::default()
         };
-        let f = Filters { min_bitrate_kbps: Some(20_000), ..Default::default() };
+        let f = Filters {
+            min_bitrate_kbps: Some(20_000),
+            ..Default::default()
+        };
         assert!(f.keeps(&item(&[8_000, 40_000])));
         assert!(!f.keeps(&item(&[8_000])));
         assert!(!f.keeps(&item(&[])));
@@ -577,8 +693,16 @@ mod tests {
 
     #[test]
     fn filters_become_query_params() {
-        let f = Filters { genre: Some("12".into()), unwatched: true, min_bitrate_kbps: Some(1), ..Default::default() };
-        assert_eq!(f.query(), [("genre", "12".to_owned()), ("unwatched", "1".to_owned())]);
+        let f = Filters {
+            genre: Some("12".into()),
+            unwatched: true,
+            min_bitrate_kbps: Some(1),
+            ..Default::default()
+        };
+        assert_eq!(
+            f.query(),
+            [("genre", "12".to_owned()), ("unwatched", "1".to_owned())]
+        );
     }
 
     #[test]
@@ -594,11 +718,35 @@ mod tests {
         let next = |eps: Vec<Metadata>| up_next(eps).map(|m| m.rating_key);
 
         // Nothing watched: the first episode, specials skipped.
-        assert_eq!(next(vec![ep("b", 1, 2, 0, 0), ep("x", 0, 1, 0, 0), ep("a", 1, 1, 0, 0)]).as_deref(), Some("a"));
+        assert_eq!(
+            next(vec![
+                ep("b", 1, 2, 0, 0),
+                ep("x", 0, 1, 0, 0),
+                ep("a", 1, 1, 0, 0)
+            ])
+            .as_deref(),
+            Some("a")
+        );
         // Part way through one: that one.
-        assert_eq!(next(vec![ep("a", 1, 1, 1, 0), ep("b", 1, 2, 0, 500), ep("c", 1, 3, 0, 0)]).as_deref(), Some("b"));
+        assert_eq!(
+            next(vec![
+                ep("a", 1, 1, 1, 0),
+                ep("b", 1, 2, 0, 500),
+                ep("c", 1, 3, 0, 0)
+            ])
+            .as_deref(),
+            Some("b")
+        );
         // After the last watched, across seasons.
-        assert_eq!(next(vec![ep("a", 1, 1, 1, 0), ep("b", 1, 2, 1, 0), ep("c", 2, 1, 0, 0)]).as_deref(), Some("c"));
+        assert_eq!(
+            next(vec![
+                ep("a", 1, 1, 1, 0),
+                ep("b", 1, 2, 1, 0),
+                ep("c", 2, 1, 0, 0)
+            ])
+            .as_deref(),
+            Some("c")
+        );
         // Everything watched.
         assert_eq!(next(vec![ep("a", 1, 1, 1, 0)]), None);
     }
@@ -611,7 +759,13 @@ mod tests {
             index: Some(index),
             ..Default::default()
         };
-        let all = vec![ep("s2e1", 2, 1), ep("x1", 0, 1), ep("s1e2", 1, 2), ep("s1e1", 1, 1), ep("s2e2", 2, 2)];
+        let all = vec![
+            ep("s2e1", 2, 1),
+            ep("x1", 0, 1),
+            ep("s1e2", 1, 2),
+            ep("s1e1", 1, 1),
+            ep("s2e2", 2, 2),
+        ];
         let keys = |v: &[Metadata]| v.iter().map(|m| m.rating_key.clone()).collect::<Vec<_>>();
 
         let (prev, after) = neighbours(all.clone(), &ep("s1e2", 1, 2));
@@ -658,17 +812,34 @@ mod tests {
             grandparent_rating_key: show.map(Into::into),
             ..Default::default()
         };
-        let hub = |id: &str, items: Vec<Metadata>| Hub { hub_identifier: id.into(), metadata: items, ..Default::default() };
+        let hub = |id: &str, items: Vec<Metadata>| Hub {
+            hub_identifier: id.into(),
+            metadata: items,
+            ..Default::default()
+        };
         let mut hubs = vec![
-            hub("home.continue", vec![item("movie1", None), item("s1e3", Some("show1"))]),
+            hub(
+                "home.continue",
+                vec![item("movie1", None), item("s1e3", Some("show1"))],
+            ),
             hub(
                 "home.ondeck",
-                vec![item("movie1", None), item("s1e4", Some("show1")), item("s2e1", Some("show2")), item("movie2", None)],
+                vec![
+                    item("movie1", None),
+                    item("s1e4", Some("show1")),
+                    item("s2e1", Some("show2")),
+                    item("movie2", None),
+                ],
             ),
             hub("home.movies.recent", vec![item("movie1", None)]),
         ];
         drop_on_deck_duplicates(&mut hubs);
-        let keys = |h: &Hub| h.metadata.iter().map(|m| m.rating_key.clone()).collect::<Vec<_>>();
+        let keys = |h: &Hub| {
+            h.metadata
+                .iter()
+                .map(|m| m.rating_key.clone())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(keys(&hubs[1]), ["s2e1", "movie2"]);
         // Other rows are left alone.
         assert_eq!(keys(&hubs[2]), ["movie1"]);
@@ -679,7 +850,10 @@ mod tests {
         let f = Filters::default();
         assert!(f.needs_whole_library("random"));
         assert!(!f.needs_whole_library("addedAt:desc"));
-        let f = Filters { min_bitrate_kbps: Some(1), ..Default::default() };
+        let f = Filters {
+            min_bitrate_kbps: Some(1),
+            ..Default::default()
+        };
         assert!(f.needs_whole_library("titleSort"));
     }
 
@@ -711,6 +885,9 @@ mod tests {
         let p = &body.container.metadata[0];
         assert_eq!(p.kind, "playlist");
         assert_eq!(p.leaf_count, Some(12));
-        assert_eq!(p.composite.as_deref(), Some("/playlists/55/composite/1700000000"));
+        assert_eq!(
+            p.composite.as_deref(),
+            Some("/playlists/55/composite/1700000000")
+        );
     }
 }

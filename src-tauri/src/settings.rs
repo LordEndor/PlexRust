@@ -83,6 +83,10 @@ pub struct Prefs {
     pub audio_language: String,
     /// As above, or "off" to start with subtitles off.
     pub subtitle_language: String,
+    /// "small", "normal", "large" or "huge".
+    pub subtitle_size: String,
+    /// A dark box behind subtitles.
+    pub subtitle_background: bool,
     /// Accent color name, such as "amber".
     pub accent: String,
     /// "small", "medium" or "large".
@@ -124,6 +128,8 @@ impl Default for Prefs {
             quality: "Original".into(),
             audio_language: String::new(),
             subtitle_language: String::new(),
+            subtitle_size: "normal".into(),
+            subtitle_background: false,
             accent: "amber".into(),
             poster_size: "medium".into(),
             show_featured: true,

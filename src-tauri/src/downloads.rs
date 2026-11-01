@@ -25,7 +25,10 @@ struct Connection {
 }
 
 #[derive(Default)]
-pub struct DownloadsState(Mutex<Option<Connection>>, Mutex<Option<(Instant, HashMap<String, Media>)>>);
+pub struct DownloadsState(
+    Mutex<Option<Connection>>,
+    Mutex<Option<(Instant, HashMap<String, Media>)>>,
+);
 
 /// The Radarr and Sonarr queues change slowly; they're asked again after this.
 const QUEUE_MAX_AGE: Duration = Duration::from_secs(15);
@@ -101,7 +104,10 @@ async fn queue(state: &AppState, downloads: &DownloadsState) -> HashMap<String, 
     }
     let servers = {
         let s = state.settings.lock().await;
-        [(Kind::Radarr, s.radarr.clone()), (Kind::Sonarr, s.sonarr.clone())]
+        [
+            (Kind::Radarr, s.radarr.clone()),
+            (Kind::Sonarr, s.sonarr.clone()),
+        ]
     };
     let fetch = |kind: Kind, url: String, key: String| async move {
         if url.is_empty() {
@@ -139,8 +145,12 @@ async fn client(state: &AppState, downloads: &DownloadsState) -> CmdResult<Arc<Q
     if saved.url.is_empty() {
         return Err("Downloads aren't set up. Add qBittorrent in Settings.".into());
     }
-    let client = Arc::new(QbitClient::new(&saved.url, &saved.username, &saved.password).map_err(err)?);
-    *conn = Some(Connection { client: client.clone(), sync: Sync::default() });
+    let client =
+        Arc::new(QbitClient::new(&saved.url, &saved.username, &saved.password).map_err(err)?);
+    *conn = Some(Connection {
+        client: client.clone(),
+        sync: Sync::default(),
+    });
     Ok(client)
 }
 
@@ -170,20 +180,34 @@ pub async fn qbit_connect(
         Some(p) => p,
         None => {
             let saved = state.settings.lock().await.qbittorrent.clone();
-            if saved.username == username { saved.password } else { String::new() }
+            if saved.username == username {
+                saved.password
+            } else {
+                String::new()
+            }
         }
     };
     let client = Arc::new(QbitClient::new(&url, &username, &password).map_err(err)?);
     let version = client.version().await.map_err(err)?;
     let mut s = state.settings.lock().await;
-    s.qbittorrent = QbitSettings { url, username, password };
+    s.qbittorrent = QbitSettings {
+        url,
+        username,
+        password,
+    };
     s.save(&state.settings_path).map_err(err)?;
-    *downloads.0.lock().await = Some(Connection { client, sync: Sync::default() });
+    *downloads.0.lock().await = Some(Connection {
+        client,
+        sync: Sync::default(),
+    });
     Ok(version)
 }
 
 #[tauri::command]
-pub async fn qbit_disconnect(state: State<'_, AppState>, downloads: State<'_, DownloadsState>) -> CmdResult<()> {
+pub async fn qbit_disconnect(
+    state: State<'_, AppState>,
+    downloads: State<'_, DownloadsState>,
+) -> CmdResult<()> {
     *downloads.0.lock().await = None;
     let mut s = state.settings.lock().await;
     s.qbittorrent = QbitSettings::default();
@@ -202,7 +226,9 @@ pub async fn downloads_list(
         // Held across the call, so two screens asking at once don't mix up
         // the update ids.
         let mut conn = downloads.0.lock().await;
-        let c = conn.as_mut().ok_or("Downloads aren't set up. Add qBittorrent in Settings.")?;
+        let c = conn
+            .as_mut()
+            .ok_or("Downloads aren't set up. Add qBittorrent in Settings.")?;
         let client = c.client.clone();
         client.sync(&mut c.sync).await.map_err(err)?;
         c.sync.snapshot()
@@ -219,7 +245,11 @@ pub async fn downloads_action(
     action: Action,
     hashes: Vec<String>,
 ) -> CmdResult<()> {
-    client(&state, &downloads).await?.act(action, &hashes).await.map_err(err)
+    client(&state, &downloads)
+        .await?
+        .act(action, &hashes)
+        .await
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -227,5 +257,9 @@ pub async fn downloads_toggle_alt_speed(
     state: State<'_, AppState>,
     downloads: State<'_, DownloadsState>,
 ) -> CmdResult<()> {
-    client(&state, &downloads).await?.toggle_alt_speed().await.map_err(err)
+    client(&state, &downloads)
+        .await?
+        .toggle_alt_speed()
+        .await
+        .map_err(err)
 }

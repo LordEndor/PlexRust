@@ -63,6 +63,24 @@ export interface PlaybackInfo {
   rememberedTracks?: TrackChoice | null;
 }
 
+/** A subtitle Plex found online for an item. */
+export interface SubtitleResult {
+  key: string;
+  codec?: string | null;
+  language?: string | null;
+  languageCode?: string | null;
+  displayTitle?: string | null;
+  title?: string | null;
+  providerTitle?: string | null;
+  score?: number | null;
+  hearingImpaired?: boolean | null;
+  forced?: boolean | null;
+  perfectMatch?: boolean | null;
+  downloaded?: boolean | null;
+}
+
+export type ExternalSubtitle = PlaybackInfo["externalSubtitles"][number];
+
 export type PlaybackState = "playing" | "paused" | "stopped";
 
 export const playback = {
@@ -72,6 +90,11 @@ export const playback = {
     invoke<string>("transcode_url", { ratingKey, maxBitrateKbps, resolution, offsetSecs: 0, session }),
   stopTranscode: (session: string) => invoke<void>("stop_transcode", { session }),
   loadPreviews: (partId: number) => invoke<PreviewInfo | null>("load_previews", { partId }),
+  searchSubtitles: (ratingKey: string, language: string, hearingImpaired: boolean) =>
+    invoke<SubtitleResult[]>("subtitle_search", { ratingKey, language, hearingImpaired }),
+  /** Resolves with every external subtitle the item has once the new one shows up. */
+  downloadSubtitle: (ratingKey: string, key: string) =>
+    invoke<ExternalSubtitle[]>("subtitle_download", { ratingKey, key }),
   rememberTracks: (key: string, choice: TrackChoice) => invoke<void>("remember_tracks", { key, choice }),
   report: (ratingKey: string, playbackState: PlaybackState, timeMs: number, durationMs: number) =>
     invoke<void>("report_progress", {

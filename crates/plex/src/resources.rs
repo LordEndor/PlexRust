@@ -52,7 +52,11 @@ impl PlexClient {
         let resp = self
             .http
             .get(format!("{CLIENTS_PLEX_TV}/api/v2/resources"))
-            .query(&[("includeHttps", "1"), ("includeRelay", "1"), ("includeIPv6", "1")])
+            .query(&[
+                ("includeHttps", "1"),
+                ("includeRelay", "1"),
+                ("includeIPv6", "1"),
+            ])
             .header("X-Plex-Token", token)
             .send()
             .await?;
