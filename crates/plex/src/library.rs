@@ -519,6 +519,26 @@ impl PlexClient {
         Ok(c.metadata)
     }
 
+    /// Items of one type (1 movies, 4 episodes) added to a library after
+    /// `since` (Unix seconds), newest first, at most 50.
+    pub async fn added_since(&self, server: &ServerConnection, section: &str, kind: u8, since: i64) -> Result<Vec<Metadata>> {
+        let (kind, since) = (kind.to_string(), since.to_string());
+        let c = self
+            .container(
+                server,
+                &format!("/library/sections/{section}/all"),
+                &[
+                    ("type", kind.as_str()),
+                    ("sort", "addedAt:desc"),
+                    ("addedAt>>", since.as_str()),
+                    ("X-Plex-Container-Start", "0"),
+                    ("X-Plex-Container-Size", "50"),
+                ],
+            )
+            .await?;
+        Ok(c.metadata)
+    }
+
     /// The item on this server with Plex's id `guid` (`plex://movie/...`), if any.
     pub async fn find_by_guid(&self, server: &ServerConnection, guid: &str) -> Result<Option<Metadata>> {
         let c = self.container(server, "/library/all", &[("guid", guid)]).await?;

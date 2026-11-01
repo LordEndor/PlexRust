@@ -214,6 +214,51 @@ export function SettingsView() {
           </Section>
         )}
 
+        {!IS_WEB && prefs && (
+          <Section title="Notifications and Discord">
+            <Row
+              label="New episodes"
+              hint="A Windows notification when a new episode of a show you watch, or a movie on your watchlist, is added. Checked every 10 minutes while the app is open."
+            >
+              <Segmented
+                value={prefs.newArrivalAlerts ? "on" : "off"}
+                options={[
+                  { value: "on", label: "On" },
+                  { value: "off", label: "Off" },
+                ]}
+                onChange={(v) => savePrefs({ newArrivalAlerts: v === "on" })}
+              />
+            </Row>
+            <Row
+              label="Discord status"
+              hint="Shows “Watching” with the title and time left on your Discord profile while something plays. Discord has to be running on this PC."
+            >
+              <Segmented
+                value={prefs.discordStatus ? "on" : "off"}
+                options={[
+                  { value: "on", label: "On" },
+                  { value: "off", label: "Off" },
+                ]}
+                onChange={(v) => savePrefs({ discordStatus: v === "on" })}
+              />
+            </Row>
+            {prefs.discordStatus && (
+              <Row
+                label="Discord application ID"
+                hint="Discord shows the status under an application's name. Make one called PlexRust at discord.com/developers/applications (New Application), then paste its Application ID here."
+              >
+                <input
+                  defaultValue={prefs.discordAppId}
+                  onBlur={(e) => savePrefs({ discordAppId: e.target.value.replace(/\D/g, "") })}
+                  placeholder="123456789012345678"
+                  aria-label="Discord application ID"
+                  className={cn(inputClass, "w-56")}
+                />
+              </Row>
+            )}
+          </Section>
+        )}
+
         <Section title="About">
           <Row label="PlexRust" hint="New versions are also checked for every time the app starts.">
             <span className="text-muted-foreground text-sm tabular-nums">{version && `v${version}`}</span>

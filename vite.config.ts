@@ -17,6 +17,7 @@ const webAliases = [
   { find: /^@tauri-apps\/plugin-updater$/, replacement: src("web/shims/updater.ts") },
   { find: /^@tauri-apps\/plugin-process$/, replacement: src("web/shims/process.ts") },
   { find: /^@tauri-apps\/plugin-opener$/, replacement: src("web/shims/opener.ts") },
+  { find: /^@tauri-apps\/plugin-notification$/, replacement: src("web/shims/notification.ts") },
   { find: /^@\/screens\/Player$/, replacement: src("web/WebPlayer.tsx") },
 ];
 

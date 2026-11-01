@@ -103,6 +103,12 @@ pub struct Prefs {
     pub custom_rows: Vec<CustomRow>,
     /// A message when something qBittorrent downloaded shows up in Plex.
     pub ready_toasts: bool,
+    /// A Windows notification for new episodes and watchlist movies.
+    pub new_arrival_alerts: bool,
+    /// Show what's playing as a Discord status.
+    pub discord_status: bool,
+    /// The Discord application id the status is shown under.
+    pub discord_app_id: String,
 }
 
 /// A Home row listing one library in a picked order, optionally narrowed down.
@@ -138,6 +144,9 @@ impl Default for Prefs {
             library_sorts: BTreeMap::new(),
             custom_rows: Vec::new(),
             ready_toasts: true,
+            new_arrival_alerts: true,
+            discord_status: false,
+            discord_app_id: String::new(),
         }
     }
 }

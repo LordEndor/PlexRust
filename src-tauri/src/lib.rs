@@ -3,6 +3,7 @@ mod commands;
 mod downloads;
 mod images;
 mod manage;
+mod notify;
 mod offline;
 mod player;
 mod requests;
@@ -32,6 +33,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_mpv::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let settings_path = app.path().app_config_dir()?.join("settings.json");
@@ -49,6 +51,7 @@ pub fn run() {
             app.manage(commands::FilteredLibrary::default());
             app.manage(requests::SeerrState::default());
             app.manage(downloads::DownloadsState::default());
+            app.manage(notify::DiscordState::default());
             app.manage(offline::OfflineState::load(app.path().app_data_dir()?.join("offline")));
             app.manage(AppState {
                 plex,
@@ -113,6 +116,9 @@ pub fn run() {
             offline::offline_delete,
             offline::offline_sync,
             offline::offline_folder,
+            notify::new_arrivals,
+            notify::discord_presence,
+            notify::discord_clear,
             watchlist::watchlist,
             watchlist::watchlist_set,
             watchlist::watchlist_has,

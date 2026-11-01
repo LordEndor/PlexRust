@@ -37,6 +37,12 @@ export interface Prefs {
   customRows: CustomRow[];
   /** A message when something qBittorrent downloaded shows up in Plex. */
   readyToasts: boolean;
+  /** A Windows notification for new episodes of shows being watched, and watchlist movies. */
+  newArrivalAlerts: boolean;
+  /** Show what's playing as a Discord status. */
+  discordStatus: boolean;
+  /** The Discord application id the status is shown under. */
+  discordAppId: string;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -57,6 +63,9 @@ export const DEFAULT_PREFS: Prefs = {
   librarySorts: {},
   customRows: [],
   readyToasts: true,
+  newArrivalAlerts: true,
+  discordStatus: false,
+  discordAppId: "",
 };
 
 // One copy for the whole app, so the settings page and the player agree.
