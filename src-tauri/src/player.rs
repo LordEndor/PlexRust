@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::AppState;
 use crate::commands::{CmdResult, current_server, err};
+use crate::offline::OfflineState;
 use crate::settings::TrackChoice;
 
 /// Seek-bar thumbnails for recently played files, served to the UI through
@@ -184,12 +185,19 @@ pub async fn playback_info(
     playlist: Option<String>,
 ) -> CmdResult<PlaybackInfo> {
     let server = current_server(&state).await?;
-    let item = state
-        .plex
-        .metadata(&server, &rating_key)
-        .await
-        .map_err(err)?
-        .ok_or("That item no longer exists on the server")?;
+    // A downloaded copy plays from disk, and still plays when the server
+    // can't be reached, from the details saved with it.
+    let local = app.state::<OfflineState>().local(&server.machine_id, &rating_key).await;
+    let (item, offline_only) = match (state.plex.metadata(&server, &rating_key).await, &local) {
+        (Ok(Some(item)), _) => (item, false),
+        (Ok(None), _) => return Err("That item no longer exists on the server".into()),
+        (Err(_), Some((_, saved))) => {
+            let mut item = saved.item.clone();
+            item.view_offset = Some(saved.view_offset_ms);
+            (item, true)
+        }
+        (Err(e), None) => return Err(err(e)),
+    };
     let part = item
         .media
         .first()
@@ -197,7 +205,8 @@ pub async fn playback_info(
         .ok_or("This item has no playable file")?;
     let key = part.key.as_deref().ok_or("This item has no playable file")?;
 
-    let external_subtitles = external_subtitles(&state, &server, part);
+    // Without the server, only what's inside the file itself is there.
+    let external_subtitles = if offline_only { Vec::new() } else { external_subtitles(&state, &server, part) };
 
     let strip_dolby_vision = part
         .stream
@@ -222,7 +231,10 @@ pub async fn playback_info(
     let queue: Vec<NextUp> = queue.into_iter().map(NextUp::from).collect();
 
     Ok(PlaybackInfo {
-        url: state.plex.direct_url(&server, key),
+        url: match &local {
+            Some((path, _)) => path.to_string_lossy().into_owned(),
+            None => state.plex.direct_url(&server, key),
+        },
         rating_key: item.rating_key,
         title: item.title,
         subtitle,
@@ -237,7 +249,7 @@ pub async fn playback_info(
         previous,
         queue,
         part_id: part.id,
-        has_previews: part.indexes.as_deref() == Some("sd"),
+        has_previews: !offline_only && part.indexes.as_deref() == Some("sd"),
         chapters: item.chapters.clone(),
         remembered_tracks: state.settings.lock().await.tracks.get(&track_key).cloned(),
         track_key,
@@ -269,21 +281,27 @@ pub async fn stop_transcode(state: State<'_, AppState>, session: String) -> CmdR
 #[tauri::command]
 pub async fn report_progress(
     state: State<'_, AppState>,
+    offline: State<'_, OfflineState>,
     rating_key: String,
     playback_state: String,
     time_ms: u64,
     duration_ms: u64,
 ) -> CmdResult<()> {
     let server = current_server(&state).await?;
-    state
+    let watched = playback_state == "stopped" && duration_ms > 0 && time_ms * 10 >= duration_ms * 9;
+    let mut sent = state
         .plex
         .timeline(&server, &rating_key, &playback_state, time_ms, duration_ms)
-        .await
-        .map_err(err)?;
-    if playback_state == "stopped" && duration_ms > 0 && time_ms * 10 >= duration_ms * 9 {
-        state.plex.scrobble(&server, &rating_key).await.map_err(err)?;
+        .await;
+    if sent.is_ok() && watched {
+        sent = state.plex.scrobble(&server, &rating_key).await;
     }
-    Ok(())
+    // A downloaded copy keeps its own position, and remembers to tell Plex
+    // later when the server didn't hear about it now.
+    offline
+        .record_progress(&server.machine_id, &rating_key, time_ms, watched, sent.is_err())
+        .await;
+    sent.map_err(err)
 }
 
 /// Subtitle files stored next to the video (or downloaded into Plex), as

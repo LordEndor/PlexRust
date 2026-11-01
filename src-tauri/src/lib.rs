@@ -3,6 +3,7 @@ mod commands;
 mod downloads;
 mod images;
 mod manage;
+mod offline;
 mod player;
 mod requests;
 mod settings;
@@ -48,6 +49,7 @@ pub fn run() {
             app.manage(commands::FilteredLibrary::default());
             app.manage(requests::SeerrState::default());
             app.manage(downloads::DownloadsState::default());
+            app.manage(offline::OfflineState::load(app.path().app_data_dir()?.join("offline")));
             app.manage(AppState {
                 plex,
                 settings: Mutex::new(settings),
@@ -106,6 +108,11 @@ pub fn run() {
             manage::edit_item,
             manage::item_posters,
             manage::set_poster,
+            offline::offline_list,
+            offline::offline_download,
+            offline::offline_delete,
+            offline::offline_sync,
+            offline::offline_folder,
             watchlist::watchlist,
             watchlist::watchlist_set,
             watchlist::watchlist_has,

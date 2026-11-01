@@ -7,6 +7,7 @@ import {
   Compass,
   Download,
   Film,
+  HardDriveDownload,
   History,
   Home as HomeIcon,
   Image,
@@ -29,6 +30,7 @@ import { api, errorMessage, type LibrarySection, type ServerConnection, type Use
 import { NavContext, routeKey, type Nav, type Route } from "@/lib/nav";
 import { useCalendarEnabled } from "@/lib/calendar";
 import { DownloadsContext, isActive, useDownloads, useDownloadsEnabled } from "@/lib/downloads";
+import { OFFLINE_SUPPORTED, useOffline } from "@/lib/offline";
 import { usePrefs } from "@/lib/prefs";
 import { ReadyToasts } from "@/components/ReadyToasts";
 import { useSeerrEnabled } from "@/lib/seerr";
@@ -41,6 +43,7 @@ import { DiscoverView } from "@/screens/DiscoverView";
 import { DownloadsView } from "@/screens/DownloadsView";
 import { ItemView } from "@/screens/ItemView";
 import { LibraryView } from "@/screens/LibraryView";
+import { OfflineView } from "@/screens/OfflineView";
 import { PersonView } from "@/screens/PersonView";
 import { PlaylistsView, PlaylistView } from "@/screens/PlaylistView";
 import { Player } from "@/screens/Player";
@@ -88,6 +91,10 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   // The Downloads screen asks every 2 seconds itself; this only feeds the count.
   const downloads = useDownloads(!!downloadsEnabled, 30_000);
   const downloading = downloads.snapshot?.torrents.filter(isActive).length ?? 0;
+  const offlineItems = useOffline();
+  const savingOffline =
+    offlineItems?.filter((i) => i.serverId === server.machineId && (i.status === "downloading" || i.status === "queued"))
+      .length ?? 0;
   const prefs = usePrefs();
 
   function toggleSidebar() {
@@ -261,6 +268,16 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
               onClick={() => goRoot({ name: "downloads" })}
             />
           )}
+          {OFFLINE_SUPPORTED && (
+            <NavItem
+              icon={HardDriveDownload}
+              label="Offline"
+              badge={savingOffline || undefined}
+              collapsed={collapsed}
+              active={root.name === "offline"}
+              onClick={() => goRoot({ name: "offline" })}
+            />
+          )}
           <div className="flex-1" />
           <NavItem
             icon={Settings}
@@ -364,6 +381,8 @@ function Screen({ route }: { route: Route }) {
       return <WatchlistView />;
     case "history":
       return <HistoryView />;
+    case "offline":
+      return <OfflineView />;
     case "person":
       return <PersonView role={route.role} id={route.id} title={route.title} thumb={route.thumb} />;
     case "player":

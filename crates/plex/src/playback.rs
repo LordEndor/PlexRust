@@ -59,6 +59,18 @@ impl PlexClient {
         url.into()
     }
 
+    /// Starts downloading a whole file from `url` (a [`PlexClient::direct_url`]).
+    /// Read it with `chunk()`. Allowed to run for hours, unlike other requests.
+    pub async fn download(&self, url: &str) -> Result<reqwest::Response> {
+        let resp = self
+            .http
+            .get(url)
+            .timeout(std::time::Duration::from_secs(24 * 60 * 60))
+            .send()
+            .await?;
+        check(resp).await
+    }
+
     pub async fn stop_transcode(&self, server: &ServerConnection, session: &str) -> Result<()> {
         let resp = self
             .http
