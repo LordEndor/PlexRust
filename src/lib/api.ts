@@ -131,6 +131,8 @@ export type ItemType = "movie" | "show" | "season" | "episode" | "collection" | 
 
 export interface Metadata {
   ratingKey: string;
+  /** Plex's id for the title, such as `plex://movie/5d77...`, the same on every server. */
+  guid?: string | null;
   type: ItemType;
   title: string;
   originalTitle?: string | null;

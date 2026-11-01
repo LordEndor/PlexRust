@@ -8,17 +8,22 @@ import { useLibraryChanged } from "@/lib/changes";
 import { CUSTOM_PREFIX, customHubs } from "@/lib/customRows";
 import { useNav } from "@/lib/nav";
 import { arrangeHubs, posterSize, usePrefs } from "@/lib/prefs";
+import { useWatchlistChanged, watchlist, WATCHLIST_HUB } from "@/lib/watchlist";
 
 export function HomeView() {
   const [hubs, setHubs] = useState<Hub[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sections, setSections] = useState<LibrarySection[]>([]);
   const [custom, setCustom] = useState<Hub[]>([]);
+  const [watch, setWatch] = useState<Hub[]>([]);
   const prefs = usePrefs();
   const nav = useNav();
   const [featured, setFeatured] = useState<Metadata[]>([]);
   const showFeatured = prefs?.showFeatured !== false;
-  const rows = useMemo(() => (hubs ? arrangeHubs([...hubs, ...custom], prefs) : null), [hubs, custom, prefs]);
+  const rows = useMemo(
+    () => (hubs ? arrangeHubs([...hubs, ...watch, ...custom], prefs) : null),
+    [hubs, watch, custom, prefs],
+  );
   const width = posterSize(prefs).poster;
 
   useEffect(() => {
@@ -37,7 +42,23 @@ export function HomeView() {
   useEffect(loadCustom, [loadCustom]);
   useLibraryChanged(loadCustom);
 
+  // The watchlist titles already on the server, as a row. The rest are on the Watchlist page.
+  const loadWatch = useCallback(() => {
+    watchlist
+      .list()
+      .then((items) => {
+        const local = items.flatMap((i) => (i.local ? [i.local] : []));
+        setWatch(
+          local.length ? [{ hubIdentifier: WATCHLIST_HUB, title: "Watchlist", type: "mixed", Metadata: local.slice(0, 30) }] : [],
+        );
+      })
+      .catch(() => setWatch([]));
+  }, []);
+  useEffect(loadWatch, [loadWatch]);
+  useWatchlistChanged(loadWatch);
+
   function showAll(hub: Hub) {
+    if (hub.hubIdentifier === WATCHLIST_HUB) return nav.navigate({ name: "watchlist" });
     const row = customRows?.find((r) => CUSTOM_PREFIX + r.id === hub.hubIdentifier);
     const section = row && sections.find((s) => s.key === row.section);
     if (row && section) nav.navigate({ name: "library", section, sort: row.sort, filters: row.filters });
@@ -90,7 +111,9 @@ export function HomeView() {
         <HubRow
           key={h.hubIdentifier}
           hub={h}
-          onShowAll={h.hubIdentifier.startsWith(CUSTOM_PREFIX) ? () => showAll(h) : undefined}
+          onShowAll={
+            h.hubIdentifier.startsWith(CUSTOM_PREFIX) || h.hubIdentifier === WATCHLIST_HUB ? () => showAll(h) : undefined
+          }
         />
       ))}
     </div>

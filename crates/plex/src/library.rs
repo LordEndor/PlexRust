@@ -12,6 +12,9 @@ use crate::server::ServerConnection;
 #[serde(rename_all = "camelCase", default)]
 pub struct Metadata {
     pub rating_key: String,
+    /// Plex's own id for the title, such as `plex://movie/5d7768...`; the
+    /// same on every server and on the watchlist.
+    pub guid: Option<String>,
     #[serde(rename = "type")]
     pub kind: String,
     pub title: String,
@@ -473,6 +476,12 @@ impl PlexClient {
             .container(server, &format!("/library/sections/{section}/all"), &[(role, id.as_str())])
             .await?;
         Ok(c.metadata)
+    }
+
+    /// The item on this server with Plex's id `guid` (`plex://movie/...`), if any.
+    pub async fn find_by_guid(&self, server: &ServerConnection, guid: &str) -> Result<Option<Metadata>> {
+        let c = self.container(server, "/library/all", &[("guid", guid)]).await?;
+        Ok(c.metadata.into_iter().next())
     }
 
     /// Full details for one item, including cast, genres and media info.

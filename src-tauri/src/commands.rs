@@ -88,7 +88,7 @@ pub struct ServerSummary {
     platform: Option<String>,
 }
 
-async fn account_token(state: &AppState) -> CmdResult<String> {
+pub(crate) async fn account_token(state: &AppState) -> CmdResult<String> {
     state
         .settings
         .lock()

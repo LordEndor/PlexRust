@@ -26,6 +26,8 @@ import { serviceCommands } from "@/web/services";
 
 const PLEX_TV = "https://plex.tv";
 const CLIENTS_PLEX_TV = "https://clients.plex.tv";
+/** Plex's Discover service, which keeps the account's watchlist. */
+const DISCOVER = "https://discover.provider.plex.tv";
 const PROBE_TIMEOUT_MS = 4000;
 const REQUEST_TIMEOUT_MS = 20_000;
 
@@ -688,6 +690,51 @@ const commands: Record<string, Command> = {
   async trailers({ ratingKey }): Promise<Metadata[]> {
     const c = await container(`/library/metadata/${ratingKey}/extras`);
     return (c.Metadata ?? []).map(meta).filter((m) => m.extraType === 1);
+  },
+
+  async watchlist(): Promise<{ item: Metadata; local: Metadata | null; tmdbId: number | null }[]> {
+    const items: Metadata[] = [];
+    for (;;) {
+      const page = await request<{ MediaContainer?: Container & { totalSize?: number } }>(
+        buildUrl(
+          DISCOVER,
+          "/library/sections/watchlist/all",
+          { sort: "watchlistedAt:desc", includeGuids: 1, "X-Plex-Container-Start": items.length, "X-Plex-Container-Size": 100 },
+          accountToken(),
+        ),
+      );
+      const got = (page.MediaContainer?.Metadata ?? []).map(meta);
+      items.push(...got);
+      if (!got.length || items.length >= (page.MediaContainer?.totalSize ?? 0) || items.length >= 1000) break;
+    }
+    return Promise.all(
+      items.map(async (item) => {
+        const local = item.guid
+          ? await container("/library/all", { guid: item.guid })
+              .then((c) => (c.Metadata?.[0] ? meta(c.Metadata[0]) : null))
+              .catch(() => null)
+          : null;
+        const tmdb = (item as { Guid?: { id: string }[] }).Guid?.find((g) => g.id.startsWith("tmdb://"));
+        return { item, local, tmdbId: tmdb ? Number(tmdb.id.slice(7)) || null : null };
+      }),
+    );
+  },
+
+  async watchlist_set({ guid, on }) {
+    const id = String(guid).split("/").pop()!;
+    await request(
+      buildUrl(DISCOVER, `/actions/${on ? "addToWatchlist" : "removeFromWatchlist"}`, { ratingKey: id }, accountToken()),
+      { method: "PUT", json: false },
+    );
+  },
+
+  async watchlist_has({ guid }): Promise<boolean> {
+    const id = String(guid).split("/").pop()!;
+    const body = await request<{ MediaContainer?: { UserState?: { watchlistedAt?: number } | { watchlistedAt?: number }[] } }>(
+      buildUrl(DISCOVER, `/library/metadata/${id}/userState`, {}, accountToken()),
+    );
+    const state = body.MediaContainer?.UserState;
+    return !!(Array.isArray(state) ? state[0] : state)?.watchlistedAt;
   },
 
   async extras({ ratingKey }): Promise<Metadata[]> {

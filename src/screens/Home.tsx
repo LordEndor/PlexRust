@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  Bookmark,
   CalendarDays,
   Clapperboard,
   Compass,
@@ -46,6 +47,7 @@ import { RequestsView } from "@/screens/RequestsView";
 import { RequestView } from "@/screens/RequestView";
 import { SearchView } from "@/screens/SearchView";
 import { SettingsView } from "@/screens/SettingsView";
+import { WatchlistView } from "@/screens/WatchlistView";
 
 const sectionIcon = { movie: Film, show: Tv, artist: Music, photo: Image } as const;
 const MAX_STACK = 15;
@@ -209,6 +211,13 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
                 />
               ))}
           <NavItem
+            icon={Bookmark}
+            label="Watchlist"
+            collapsed={collapsed}
+            active={root.name === "watchlist"}
+            onClick={() => goRoot({ name: "watchlist" })}
+          />
+          <NavItem
             icon={ListVideo}
             label="Playlists"
             collapsed={collapsed}
@@ -342,6 +351,8 @@ function Screen({ route }: { route: Route }) {
       return <PlaylistsView />;
     case "playlist":
       return <PlaylistView ratingKey={route.ratingKey} />;
+    case "watchlist":
+      return <WatchlistView />;
     case "person":
       return <PersonView role={route.role} id={route.id} title={route.title} thumb={route.thumb} />;
     case "player":

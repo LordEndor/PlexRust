@@ -5,6 +5,7 @@ mod images;
 mod player;
 mod requests;
 mod settings;
+mod watchlist;
 mod window_state;
 
 use std::path::PathBuf;
@@ -93,6 +94,9 @@ pub fn run() {
             player::remember_tracks,
             player::subtitle_search,
             player::subtitle_download,
+            watchlist::watchlist,
+            watchlist::watchlist_set,
+            watchlist::watchlist_has,
             window_state::mini_player,
             window_state::pin_window,
             requests::seerr_config,
