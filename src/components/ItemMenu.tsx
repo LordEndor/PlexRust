@@ -1,7 +1,22 @@
 import { useState } from "react";
-import { Eye, EyeOff, Info, Layers, Play, Tv, X } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  FileSearch,
+  Image,
+  Info,
+  Layers,
+  Pencil,
+  Play,
+  RefreshCw,
+  ScanSearch,
+  Trash2,
+  Tv,
+  X,
+} from "lucide-react";
 
 import { InfoDialog } from "@/components/InfoDialog";
+import { ManageDialogs } from "@/components/ManageDialogs";
 
 import {
   ContextMenu,
@@ -14,6 +29,7 @@ import {
 import { errorMessage, library, type Metadata } from "@/lib/api";
 import { notifyLibraryChanged } from "@/lib/changes";
 import { isWatched, progress, unwatchedCount } from "@/lib/format";
+import { manage, type ManageDialog } from "@/lib/manage";
 import { useNav, type Nav } from "@/lib/nav";
 
 export interface ItemAction {
@@ -38,7 +54,7 @@ async function act(task: Promise<void>) {
 export function itemActions(
   item: Metadata,
   nav: Nav,
-  opts: { continueWatching?: boolean; onInfo?: () => void } = {},
+  opts: { continueWatching?: boolean; onInfo?: () => void; onManage?: (dialog: ManageDialog) => void } = {},
 ): ItemAction[] {
   const actions: ItemAction[] = [];
   const playable = item.type === "movie" || item.type === "episode";
@@ -102,6 +118,23 @@ export function itemActions(
   if (opts.onInfo) {
     actions.push({ label: "Get info", icon: Info, run: opts.onInfo, separated: true });
   }
+  // Server housekeeping; Plex only lets the owner (or an admin) do these.
+  const manageable = ["movie", "show", "season", "episode"].includes(item.type);
+  if (opts.onManage && manageable) {
+    const open = opts.onManage;
+    actions.push(
+      { label: "Refresh metadata", icon: RefreshCw, run: () => act(manage.refresh(item.ratingKey)), separated: true },
+      { label: "Analyze", icon: FileSearch, run: () => act(manage.analyze(item.ratingKey)) },
+    );
+    if (item.type === "movie" || item.type === "show") {
+      actions.push({ label: "Fix match…", icon: ScanSearch, run: () => open("match") });
+    }
+    actions.push(
+      { label: "Edit details…", icon: Pencil, run: () => open("edit") },
+      { label: "Change poster…", icon: Image, run: () => open("poster") },
+      { label: "Delete…", icon: Trash2, run: () => open("delete") },
+    );
+  }
   return actions;
 }
 
@@ -117,7 +150,8 @@ export function ItemContextMenu({
 }) {
   const nav = useNav();
   const [info, setInfo] = useState(false);
-  const actions = itemActions(item, nav, { continueWatching, onInfo: () => setInfo(true) });
+  const [dialog, setDialog] = useState<ManageDialog | null>(null);
+  const actions = itemActions(item, nav, { continueWatching, onInfo: () => setInfo(true), onManage: setDialog });
   return (
     <>
       <ContextMenu>
@@ -138,6 +172,7 @@ export function ItemContextMenu({
         </ContextMenuContent>
       </ContextMenu>
       {info && <InfoDialog item={item} open={info} onOpenChange={setInfo} />}
+      <ManageDialogs item={item} dialog={dialog} onClose={() => setDialog(null)} />
     </>
   );
 }

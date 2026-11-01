@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDown, ArrowUp, ChevronDown, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Ellipsis, FolderSearch, RefreshCw, X } from "lucide-react";
 
 import { Poster } from "@/components/Poster";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useLibraryChanged } from "@/lib/changes";
 import { errorMessage, library, type FilterValue, type Filters, type LibrarySection, type Metadata } from "@/lib/api";
 import { posterSize, savePrefs, usePrefs } from "@/lib/prefs";
+import { manage } from "@/lib/manage";
 import { cn } from "@/lib/utils";
 
 const PAGE = 120;
@@ -332,8 +333,9 @@ function ItemsGrid({
             <X /> Clear
           </Button>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1">
           <SortMenu sort={sort} kind={section.type} onChange={setSort} />
+          <LibraryMenu section={section} />
         </div>
       </div>
 
@@ -446,5 +448,36 @@ function FilterMenu({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Library housekeeping: look for new files, or refresh everything's metadata. */
+function LibraryMenu({ section }: { section: LibrarySection }) {
+  const [note, setNote] = useState<string | null>(null);
+  const run = (force: boolean) =>
+    manage
+      .scanLibrary(section.key, force)
+      .then(() => setNote(force ? "Refreshing all metadata on the server…" : "Scanning for new files on the server…"))
+      .catch((e) => setNote(errorMessage(e)))
+      .finally(() => window.setTimeout(() => setNote(null), 5000));
+  return (
+    <>
+      {note && <span className="text-muted-foreground text-xs">{note}</span>}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="icon" variant="ghost" className="size-8" title="Library actions">
+            <Ellipsis />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuCheckItem onSelect={() => run(false)} className="pl-2 [&_svg]:size-4">
+            <FolderSearch /> Scan library files
+          </DropdownMenuCheckItem>
+          <DropdownMenuCheckItem onSelect={() => run(true)} className="pl-2 [&_svg]:size-4">
+            <RefreshCw /> Refresh all metadata
+          </DropdownMenuCheckItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 }

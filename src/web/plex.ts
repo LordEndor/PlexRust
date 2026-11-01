@@ -737,6 +737,69 @@ const commands: Record<string, Command> = {
     return !!(Array.isArray(state) ? state[0] : state)?.watchlistedAt;
   },
 
+  async scan_library({ section, force }) {
+    const server = currentServer();
+    await request(buildUrl(server.uri, `/library/sections/${section}/refresh`, force ? { force: 1 } : {}, server.token), {
+      json: false,
+    });
+  },
+
+  async refresh_item({ ratingKey }) {
+    const server = currentServer();
+    await request(buildUrl(server.uri, `/library/metadata/${ratingKey}/refresh`, {}, server.token), { method: "PUT", json: false });
+  },
+
+  async analyze_item({ ratingKey }) {
+    const server = currentServer();
+    await request(buildUrl(server.uri, `/library/metadata/${ratingKey}/analyze`, {}, server.token), { method: "PUT", json: false });
+  },
+
+  async delete_item({ ratingKey }) {
+    const server = currentServer();
+    await request(buildUrl(server.uri, `/library/metadata/${ratingKey}`, {}, server.token), { method: "DELETE", json: false });
+  },
+
+  async find_matches({ ratingKey, title, year }) {
+    const c = await container(`/library/metadata/${ratingKey}/matches`, {
+      manual: 1,
+      title: title as string,
+      year: (year as number | null) ?? "",
+    });
+    return (c as { SearchResult?: unknown[] }).SearchResult ?? [];
+  },
+
+  async apply_match({ ratingKey, result }) {
+    const server = currentServer();
+    const r = result as { guid: string; name: string; year?: number | null };
+    await request(
+      buildUrl(server.uri, `/library/metadata/${ratingKey}/match`, { guid: r.guid, name: r.name, year: r.year ?? "" }, server.token),
+      { method: "PUT", json: false },
+    );
+  },
+
+  async edit_item({ section, ratingKey, kind, fields }) {
+    const server = currentServer();
+    const types: Record<string, number> = { movie: 1, show: 2, season: 3, episode: 4 };
+    const params: Params = { type: types[kind as string], id: ratingKey as string };
+    for (const [field, value] of fields as [string, string][]) {
+      params[`${field}.value`] = value;
+      params[`${field}.locked`] = 1;
+    }
+    await request(buildUrl(server.uri, `/library/sections/${section}/all`, params, server.token), { method: "PUT", json: false });
+  },
+
+  async item_posters({ ratingKey }) {
+    return (await container(`/library/metadata/${ratingKey}/posters`)).Metadata ?? [];
+  },
+
+  async set_poster({ ratingKey, poster }) {
+    const server = currentServer();
+    await request(buildUrl(server.uri, `/library/metadata/${ratingKey}/poster`, { url: poster as string }, server.token), {
+      method: "PUT",
+      json: false,
+    });
+  },
+
   async rate({ ratingKey, rating }) {
     const server = currentServer();
     const params = { key: ratingKey as string, identifier: "com.plexapp.plugins.library", rating: rating == null ? -1 : (rating as number) };

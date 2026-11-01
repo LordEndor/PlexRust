@@ -23,6 +23,8 @@ pub struct Metadata {
     /// Such as "Director's Cut", for movies with several editions.
     pub edition_title: Option<String>,
     pub library_section_title: Option<String>,
+    #[serde(rename = "librarySectionID")]
+    pub library_section_id: Option<u64>,
     pub parent_rating_key: Option<String>,
     pub grandparent_rating_key: Option<String>,
     pub parent_title: Option<String>,

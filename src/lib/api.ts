@@ -133,9 +133,11 @@ export interface Metadata {
   ratingKey: string;
   /** Plex's id for the title, such as `plex://movie/5d77...`, the same on every server. */
   guid?: string | null;
+  librarySectionID?: number | null;
   type: ItemType;
   title: string;
   originalTitle?: string | null;
+  titleSort?: string | null;
   /** Such as "Director's Cut". */
   editionTitle?: string | null;
   librarySectionTitle?: string | null;
