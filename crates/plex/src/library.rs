@@ -120,6 +120,8 @@ pub struct Marker {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Tag {
+    /// Plex's id for the person (or genre, and so on), used to filter by it.
+    pub id: Option<u64>,
     pub tag: String,
     /// Character name, for cast members.
     pub role: Option<String>,
@@ -438,6 +440,39 @@ impl PlexClient {
             .container(server, &format!("/library/metadata/{rating_key}/extras"), &[])
             .await?;
         Ok(c.metadata.into_iter().filter(|m| m.extra_type == Some(1)).collect())
+    }
+
+    /// All of an item's extras: trailers, behind the scenes, deleted scenes,
+    /// featurettes and so on. `extra_type` tells them apart.
+    pub async fn extras(&self, server: &ServerConnection, rating_key: &str) -> Result<Vec<Metadata>> {
+        let c = self
+            .container(server, &format!("/library/metadata/{rating_key}/extras"), &[])
+            .await?;
+        Ok(c.metadata)
+    }
+
+    /// Rows of titles like this one, such as "More Like This".
+    pub async fn related(&self, server: &ServerConnection, rating_key: &str) -> Result<Vec<Hub>> {
+        let c = self
+            .container(server, &format!("/library/metadata/{rating_key}/related"), &[("count", "20")])
+            .await?;
+        Ok(c.hub.into_iter().filter(|h| !h.metadata.is_empty()).collect())
+    }
+
+    /// Movies and shows in one library with a person in them. `role` is
+    /// `actor`, `director` or `writer`; `person` is the person's tag id.
+    pub async fn with_person(
+        &self,
+        server: &ServerConnection,
+        section: &str,
+        role: &str,
+        person: u64,
+    ) -> Result<Vec<Metadata>> {
+        let id = person.to_string();
+        let c = self
+            .container(server, &format!("/library/sections/{section}/all"), &[(role, id.as_str())])
+            .await?;
+        Ok(c.metadata)
     }
 
     /// Full details for one item, including cast, genres and media info.

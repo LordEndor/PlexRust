@@ -278,6 +278,39 @@ pub async fn up_next(state: State<'_, AppState>, rating_key: String) -> CmdResul
 }
 
 #[tauri::command]
+pub async fn extras(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
+    let server = current_server(&state).await?;
+    state.plex.extras(&server, &rating_key).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn related(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Hub>> {
+    let server = current_server(&state).await?;
+    state.plex.related(&server, &rating_key).await.map_err(err)
+}
+
+/// Everything in the movie and TV libraries with a person in it, newest first.
+/// `role` is `actor`, `director` or `writer`.
+#[tauri::command]
+pub async fn person_items(state: State<'_, AppState>, role: String, id: u64) -> CmdResult<Vec<Metadata>> {
+    if !matches!(role.as_str(), "actor" | "director" | "writer") {
+        return Err(format!("Unknown role {role}"));
+    }
+    let server = current_server(&state).await?;
+    let sections = state.plex.library_sections(&server).await.map_err(err)?;
+    let mut items: Vec<Metadata> = Vec::new();
+    for s in sections.iter().filter(|s| s.kind == "movie" || s.kind == "show") {
+        // One library failing (say, a show library without this filter) shouldn't hide the rest.
+        if let Ok(found) = state.plex.with_person(&server, &s.key, &role, id).await {
+            items.extend(found);
+        }
+    }
+    items.sort_by(|a, b| b.year.cmp(&a.year).then_with(|| a.title.cmp(&b.title)));
+    items.dedup_by(|a, b| a.rating_key == b.rating_key);
+    Ok(items)
+}
+
+#[tauri::command]
 pub async fn trailers(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
     let server = current_server(&state).await?;
     state.plex.trailers(&server, &rating_key).await.map_err(err)

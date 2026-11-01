@@ -38,6 +38,7 @@ import { DiscoverView } from "@/screens/DiscoverView";
 import { DownloadsView } from "@/screens/DownloadsView";
 import { ItemView } from "@/screens/ItemView";
 import { LibraryView } from "@/screens/LibraryView";
+import { PersonView } from "@/screens/PersonView";
 import { PlaylistsView, PlaylistView } from "@/screens/PlaylistView";
 import { Player } from "@/screens/Player";
 import { HAS_TITLE_BAR, WindowControls } from "@/components/TitleBar";
@@ -341,6 +342,8 @@ function Screen({ route }: { route: Route }) {
       return <PlaylistsView />;
     case "playlist":
       return <PlaylistView ratingKey={route.ratingKey} />;
+    case "person":
+      return <PersonView role={route.role} id={route.id} title={route.title} thumb={route.thumb} />;
     case "player":
       return null;
   }

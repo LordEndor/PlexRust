@@ -690,6 +690,32 @@ const commands: Record<string, Command> = {
     return (c.Metadata ?? []).map(meta).filter((m) => m.extraType === 1);
   },
 
+  async extras({ ratingKey }): Promise<Metadata[]> {
+    return ((await container(`/library/metadata/${ratingKey}/extras`)).Metadata ?? []).map(meta);
+  },
+
+  async related({ ratingKey }): Promise<Hub[]> {
+    return hubs(await container(`/library/metadata/${ratingKey}/related`, { count: 20 }));
+  },
+
+  async person_items({ role, id }): Promise<Metadata[]> {
+    const sections = ((await container("/library/sections")).Directory ?? []) as LibrarySection[];
+    const found = await Promise.all(
+      sections
+        .filter((s) => s.type === "movie" || s.type === "show")
+        .map((s) =>
+          container(`/library/sections/${s.key}/all`, { [role as string]: id as number })
+            .then((c) => (c.Metadata ?? []).map(meta))
+            .catch(() => [] as Metadata[]),
+        ),
+    );
+    const seen = new Set<string>();
+    return found
+      .flat()
+      .filter((m) => !seen.has(m.ratingKey) && !!seen.add(m.ratingKey))
+      .sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.title.localeCompare(b.title));
+  },
+
   async metadata({ ratingKey }): Promise<Metadata> {
     return meta(await metadataRaw(ratingKey as string));
   },
