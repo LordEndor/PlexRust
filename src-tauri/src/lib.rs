@@ -90,6 +90,8 @@ pub fn run() {
             player::remember_tracks,
             player::subtitle_search,
             player::subtitle_download,
+            window_state::mini_player,
+            window_state::pin_window,
             requests::seerr_config,
             requests::seerr_connect,
             requests::seerr_disconnect,
