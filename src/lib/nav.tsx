@@ -3,6 +3,8 @@ import { createContext, useContext } from "react";
 import type { Filters, LibrarySection, ServerConnection } from "@/lib/api";
 import type { DiscoverRowKey, MediaType } from "@/lib/seerr";
 
+export type PersonRole = "actor" | "director" | "writer";
+
 export type Route =
   | { name: "home" }
   /** `sort` and `filters` open the library already sorted and narrowed down, as a custom Home row is. */
@@ -19,6 +21,8 @@ export type Route =
   | { name: "downloads" }
   | { name: "playlists" }
   | { name: "playlist"; ratingKey: string }
+  /** Everything with an actor, director or writer in it. */
+  | { name: "person"; role: PersonRole; id: number; title: string; thumb?: string | null }
   /** `playlist` plays on through that playlist rather than the show. */
   | { name: "player"; ratingKey: string; resume: boolean; playlist?: string };
 
@@ -66,6 +70,8 @@ export function routeKey(r: Route) {
       return "playlists";
     case "playlist":
       return `playlist:${r.ratingKey}`;
+    case "person":
+      return `person:${r.role}:${r.id}`;
     case "player":
       return `player:${r.ratingKey}`;
   }

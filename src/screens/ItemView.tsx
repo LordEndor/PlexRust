@@ -15,7 +15,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { errorMessage, imageUrl, library, type Metadata } from "@/lib/api";
+import { HubRow } from "@/components/HubRow";
+import { errorMessage, imageUrl, library, type Hub, type Metadata, type Tag } from "@/lib/api";
 import { useLibraryChanged } from "@/lib/changes";
 import { episodeLabel, formatDuration, isWatched, progress, resolutionLabel } from "@/lib/format";
 import { useNav } from "@/lib/nav";
@@ -26,7 +27,8 @@ import { PlaylistView } from "@/screens/PlaylistView";
 export function ItemView({ ratingKey }: { ratingKey: string }) {
   const [item, setItem] = useState<Metadata | null>(null);
   const [children, setChildren] = useState<Metadata[] | null>(null);
-  const [trailer, setTrailer] = useState<Metadata | null>(null);
+  const [extras, setExtras] = useState<Metadata[]>([]);
+  const [related, setRelated] = useState<Hub[]>([]);
   const [upNext, setUpNext] = useState<Metadata | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Bumped when watched state changes elsewhere, to load the page again.
@@ -47,10 +49,14 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
             .catch(() => live && setUpNext(null));
         }
         if (version === 0 && (m.type === "movie" || m.type === "show")) {
-          // Trailers are a bonus: no button if they can't be listed.
+          // Extras and related titles are a bonus: left out if they can't be listed.
           library
-            .trailers(ratingKey)
-            .then((t) => live && setTrailer(t[0] ?? null))
+            .extras(ratingKey)
+            .then((x) => live && setExtras(x))
+            .catch(() => {});
+          library
+            .related(ratingKey)
+            .then((h) => live && setRelated(h))
             .catch(() => {});
         }
         if (m.type === "show" || m.type === "season" || m.type === "collection") {
@@ -68,6 +74,14 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
     };
   }, [ratingKey, version]);
 
+  // A new item starts without the last one's extras and related rows.
+  useEffect(() => {
+    setExtras([]);
+    setRelated([]);
+  }, [ratingKey]);
+
+  const trailer = extras.find((x) => x.extraType === 1) ?? null;
+
   if (error) return <p className="text-destructive p-8 text-sm">{error}</p>;
   if (!item) return <HeroSkeleton />;
   if (item.type === "playlist") return <PlaylistView ratingKey={ratingKey} />;
@@ -80,6 +94,10 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
         {item.type === "season" && <Episodes episodes={children} />}
         {item.type === "collection" && <Seasons seasons={children} title="In this collection" />}
         {item.Role.length > 0 && <Cast item={item} />}
+        {extras.length > 0 && <Extras extras={extras} />}
+        {related.map((h) => (
+          <HubRow key={h.hubIdentifier || h.title} hub={h} />
+        ))}
       </div>
     </div>
   );
@@ -254,7 +272,14 @@ function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | n
             </p>
           )}
           {item.Director.length > 0 && (
-            <p className="text-muted-foreground text-sm">Directed by {item.Director.map((d) => d.tag).join(", ")}</p>
+            <p className="text-muted-foreground text-sm">
+              Directed by <People tags={item.Director} role="director" />
+            </p>
+          )}
+          {item.Writer && item.Writer.length > 0 && (
+            <p className="text-muted-foreground -mt-2 text-sm">
+              Written by <People tags={item.Writer} role="writer" />
+            </p>
           )}
         </div>
       </div>
@@ -324,23 +349,109 @@ function Episodes({ episodes }: { episodes: Metadata[] | null }) {
   );
 }
 
+/** Directors or writers, each opening their page when Plex has an id for them. */
+function People({ tags, role }: { tags: Tag[]; role: "director" | "writer" }) {
+  const { navigate } = useNav();
+  return (
+    <>
+      {tags.slice(0, 4).map((t, i) => (
+        <span key={`${t.tag}-${i}`}>
+          {i > 0 && ", "}
+          {t.id != null ? (
+            <button
+              className="text-foreground/90 hover:text-primary hover:underline"
+              onClick={() => navigate({ name: "person", role, id: t.id!, title: t.tag, thumb: t.thumb })}
+            >
+              {t.tag}
+            </button>
+          ) : (
+            t.tag
+          )}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** Plex's extra types, by `extraType`. */
+const EXTRA_LABELS: Record<number, string> = {
+  1: "Trailer",
+  2: "Deleted scene",
+  3: "Interview",
+  4: "Music video",
+  5: "Behind the scenes",
+  6: "Scene",
+  7: "Live music video",
+  8: "Lyric music video",
+  9: "Concert",
+  10: "Featurette",
+  11: "Short",
+  12: "Other",
+};
+
+function Extras({ extras }: { extras: Metadata[] }) {
+  const { server, navigate } = useNav();
+  return (
+    <section>
+      <h2 className="mb-3 text-lg font-semibold">Extras</h2>
+      <div className="-mx-2 flex gap-4 overflow-x-auto px-2 pb-2 [scrollbar-width:none]">
+        {extras.map((x) => (
+          <button
+            key={x.ratingKey}
+            onClick={() => navigate({ name: "player", ratingKey: x.ratingKey, resume: false })}
+            className="group flex w-64 shrink-0 flex-col gap-2 text-left"
+          >
+            <div className="bg-card relative aspect-video overflow-hidden rounded-lg border">
+              {x.thumb && (
+                <img
+                  src={imageUrl(server, x.thumb, 256, 144)}
+                  alt=""
+                  loading="lazy"
+                  className="size-full object-cover transition-transform group-hover:scale-105"
+                />
+              )}
+              <span className="absolute inset-0 grid place-items-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
+                <Play className="size-8 fill-white text-white" />
+              </span>
+              {x.duration ? (
+                <span className="absolute right-2 bottom-2 rounded bg-black/75 px-1.5 py-0.5 text-xs text-white tabular-nums">
+                  {formatTime(x.duration / 1000)}
+                </span>
+              ) : null}
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{x.title}</div>
+              <div className="text-muted-foreground text-xs">{EXTRA_LABELS[x.extraType ?? 12] ?? "Extra"}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Cast({ item }: { item: Metadata }) {
-  const { server } = useNav();
+  const { server, navigate } = useNav();
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold">Cast</h2>
       <div className="-mx-2 flex gap-5 overflow-x-auto px-2 pb-2 [scrollbar-width:none]">
         {item.Role.slice(0, 20).map((r) => (
-          <div key={`${r.tag}-${r.role}`} className="flex w-24 shrink-0 flex-col items-center gap-2 text-center">
-            <Avatar className="size-20">
+          <button
+            key={`${r.tag}-${r.role}`}
+            disabled={r.id == null}
+            onClick={() => r.id != null && navigate({ name: "person", role: "actor", id: r.id, title: r.tag, thumb: r.thumb })}
+            className="group flex w-24 shrink-0 flex-col items-center gap-2 text-center enabled:cursor-pointer"
+          >
+            <Avatar className="size-20 transition-transform group-enabled:group-hover:scale-105">
               {r.thumb && <AvatarImage src={imageUrl(server, r.thumb, 80, 80)} alt={r.tag} className="object-cover" />}
               <AvatarFallback>{r.tag.slice(0, 1)}</AvatarFallback>
             </Avatar>
             <div className="w-full">
-              <div className="truncate text-xs font-medium">{r.tag}</div>
+              <div className="truncate text-xs font-medium group-enabled:group-hover:underline">{r.tag}</div>
               {r.role && <div className="text-muted-foreground truncate text-xs">{r.role}</div>}
             </div>
-          </div>
+          </button>
         ))}
       </div>
     </section>

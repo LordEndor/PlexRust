@@ -1,5 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
+import type { PersonRole } from "@/lib/nav";
 import { webImageUrl } from "@/web/plex";
 
 export interface User {
@@ -62,6 +63,8 @@ export function errorMessage(e: unknown): string {
 }
 
 export interface Tag {
+  /** Plex's id for the person, genre and so on. */
+  id?: number | null;
   tag: string;
   role?: string | null;
   thumb?: string | null;
@@ -227,6 +230,9 @@ export const library = {
   playlistItems: (ratingKey: string) => invoke<Metadata[]>("playlist_items", { ratingKey }),
   collectionItems: (ratingKey: string) => invoke<Metadata[]>("collection_items", { ratingKey }),
   trailers: (ratingKey: string) => invoke<Metadata[]>("trailers", { ratingKey }),
+  extras: (ratingKey: string) => invoke<Metadata[]>("extras", { ratingKey }),
+  related: (ratingKey: string) => invoke<Hub[]>("related", { ratingKey }),
+  personItems: (role: PersonRole, id: number) => invoke<Metadata[]>("person_items", { role, id }),
   setWatched: (ratingKey: string, watched: boolean) => invoke<void>("set_watched", { ratingKey, watched }),
   removeFromContinueWatching: (ratingKey: string) => invoke<void>("remove_from_continue_watching", { ratingKey }),
   /** The episode a show or season's Play button starts; null once all are watched. */
