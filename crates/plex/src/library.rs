@@ -63,6 +63,11 @@ pub struct Metadata {
     pub updated_at: Option<i64>,
     /// Unix seconds.
     pub last_viewed_at: Option<i64>,
+    /// Unix seconds. Set on watch history entries: when this viewing was.
+    pub viewed_at: Option<i64>,
+    /// Watch history entries: which account watched it (1 is the server owner).
+    #[serde(rename = "accountID")]
+    pub account_id: Option<u64>,
     /// For playlists: `video`, `audio` or `photo`.
     pub playlist_type: Option<String>,
     #[serde(rename = "Genre")]
@@ -474,6 +479,40 @@ impl PlexClient {
         let id = person.to_string();
         let c = self
             .container(server, &format!("/library/sections/{section}/all"), &[(role, id.as_str())])
+            .await?;
+        Ok(c.metadata)
+    }
+
+    /// Sets the account's star rating for an item, 0-10 (two per star), or
+    /// clears it with `None`.
+    pub async fn rate(&self, server: &ServerConnection, rating_key: &str, rating: Option<f64>) -> Result<()> {
+        let rating = rating.map_or_else(|| "-1".to_owned(), |r| r.clamp(0.0, 10.0).to_string());
+        let resp = self
+            .http
+            .put(format!("{}/:/rate", server.uri))
+            .query(&[("key", rating_key), ("identifier", "com.plexapp.plugins.library"), ("rating", rating.as_str())])
+            .header("X-Plex-Token", &server.token)
+            .send()
+            .await?;
+        check(resp).await?;
+        Ok(())
+    }
+
+    /// The server owner's watch history, most recent first: one entry per
+    /// viewing, `start` entries in.
+    pub async fn history(&self, server: &ServerConnection, start: u32, size: u32) -> Result<Vec<Metadata>> {
+        let (start, size) = (start.to_string(), size.to_string());
+        let c = self
+            .container(
+                server,
+                "/status/sessions/history/all",
+                &[
+                    ("sort", "viewedAt:desc"),
+                    ("accountID", "1"),
+                    ("X-Plex-Container-Start", start.as_str()),
+                    ("X-Plex-Container-Size", size.as_str()),
+                ],
+            )
             .await?;
         Ok(c.metadata)
     }

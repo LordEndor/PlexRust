@@ -174,6 +174,12 @@ export interface Metadata {
   updatedAt?: number | null;
   /** Unix seconds. */
   lastViewedAt?: number | null;
+  /** Watch history entries: when this viewing was, Unix seconds. */
+  viewedAt?: number | null;
+  /** Watch history entries: who watched (1 is the server owner). */
+  accountID?: number | null;
+  /** Watch history entries: the item's key, which may no longer exist. */
+  key?: string | null;
   playlistType?: string | null;
   Genre: Tag[];
   Director: Tag[];
@@ -232,6 +238,8 @@ export const library = {
   playlistItems: (ratingKey: string) => invoke<Metadata[]>("playlist_items", { ratingKey }),
   collectionItems: (ratingKey: string) => invoke<Metadata[]>("collection_items", { ratingKey }),
   trailers: (ratingKey: string) => invoke<Metadata[]>("trailers", { ratingKey }),
+  rate: (ratingKey: string, rating: number | null) => invoke<void>("rate", { ratingKey, rating }),
+  history: (start: number, size: number) => invoke<Metadata[]>("history", { start, size }),
   extras: (ratingKey: string) => invoke<Metadata[]>("extras", { ratingKey }),
   related: (ratingKey: string) => invoke<Hub[]>("related", { ratingKey }),
   personItems: (role: PersonRole, id: number) => invoke<Metadata[]>("person_items", { role, id }),

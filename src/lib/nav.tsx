@@ -21,6 +21,7 @@ export type Route =
   | { name: "downloads" }
   | { name: "playlists" }
   | { name: "watchlist" }
+  | { name: "history" }
   | { name: "playlist"; ratingKey: string }
   /** Everything with an actor, director or writer in it. */
   | { name: "person"; role: PersonRole; id: number; title: string; thumb?: string | null }
@@ -71,6 +72,8 @@ export function routeKey(r: Route) {
       return "playlists";
     case "watchlist":
       return "watchlist";
+    case "history":
+      return "history";
     case "playlist":
       return `playlist:${r.ratingKey}`;
     case "person":
