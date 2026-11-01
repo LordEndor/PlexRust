@@ -75,6 +75,13 @@ async fn serve(app: &AppHandle, query: &str) -> Result<(Vec<u8>, String), String
     for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
         match &*k {
             "url" => path = Some(v.into_owned()),
+            // A poster saved with an offline download, read from disk.
+            "offline" => {
+                let dir = app.state::<crate::offline::OfflineState>().dir().to_path_buf();
+                let name = std::path::Path::new(&*v).file_name().ok_or("bad name")?.to_owned();
+                let bytes = std::fs::read(dir.join(name)).map_err(|e| e.to_string())?;
+                return Ok((bytes, "image/jpeg".into()));
+            }
             "bif" => bif = v.parse::<u64>().ok(),
             "i" => frame = v.parse().unwrap_or(0),
             "w" => w = v.parse().unwrap_or(w).clamp(16, 3840),

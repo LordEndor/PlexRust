@@ -3,6 +3,7 @@ import {
   Eye,
   EyeOff,
   FileSearch,
+  HardDriveDownload,
   Image,
   Info,
   Layers,
@@ -31,6 +32,7 @@ import { notifyLibraryChanged } from "@/lib/changes";
 import { isWatched, progress, unwatchedCount } from "@/lib/format";
 import { manage, type ManageDialog } from "@/lib/manage";
 import { useNav, type Nav } from "@/lib/nav";
+import { canDownload, offline } from "@/lib/offline";
 
 export interface ItemAction {
   label: string;
@@ -115,8 +117,16 @@ export function itemActions(
       run: () => nav.navigate({ name: "item", ratingKey: season }),
     });
   }
+  if (canDownload(item)) {
+    actions.push({
+      label: "Download for offline",
+      icon: HardDriveDownload,
+      run: () => act(offline.download(item.ratingKey).then(() => {})),
+      separated: true,
+    });
+  }
   if (opts.onInfo) {
-    actions.push({ label: "Get info", icon: Info, run: opts.onInfo, separated: true });
+    actions.push({ label: "Get info", icon: Info, run: opts.onInfo, separated: !canDownload(item) });
   }
   // Server housekeeping; Plex only lets the owner (or an admin) do these.
   const manageable = ["movie", "show", "season", "episode"].includes(item.type);
