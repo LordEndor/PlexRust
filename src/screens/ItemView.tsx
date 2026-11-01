@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Clapperboard, Ellipsis, Play, RotateCcw, Star } from "lucide-react";
+import { Bookmark, BookmarkCheck, Check, Clapperboard, Ellipsis, Play, RotateCcw, Star } from "lucide-react";
 
 import { InfoDialog } from "@/components/InfoDialog";
 import { ItemContextMenu, itemActions } from "@/components/ItemMenu";
@@ -22,6 +22,7 @@ import { episodeLabel, formatDuration, isWatched, progress, resolutionLabel } fr
 import { useNav } from "@/lib/nav";
 import { formatTime } from "@/lib/player";
 import { posterSize, usePrefs } from "@/lib/prefs";
+import { canWatchlist, watchlist } from "@/lib/watchlist";
 import { PlaylistView } from "@/screens/PlaylistView";
 
 export function ItemView({ ratingKey }: { ratingKey: string }) {
@@ -107,6 +108,27 @@ function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | n
   const nav = useNav();
   const { server, navigate } = nav;
   const [info, setInfo] = useState(false);
+  const watchable = canWatchlist(item);
+  // null while unknown, so the button doesn't flicker between states.
+  const [onList, setOnList] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!watchable || !item.guid) return;
+    let live = true;
+    setOnList(null);
+    watchlist
+      .has(item.guid)
+      .then((v) => live && setOnList(v))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [watchable, item.guid]);
+  const toggleWatchlist = () => {
+    if (!item.guid || onList === null) return;
+    const next = !onList;
+    setOnList(next);
+    watchlist.set(item.guid, next).catch(() => setOnList(!next));
+  };
   const actions = itemActions(item, nav, { onInfo: () => setInfo(true) }).filter(
     (a) => a.label !== "Play" && a.label !== "Resume",
   );
@@ -242,6 +264,17 @@ function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | n
                 }
               >
                 <Clapperboard /> Trailer
+              </Button>
+            )}
+            {watchable && onList !== null && (
+              <Button
+                size="icon"
+                variant="secondary"
+                className="size-10"
+                title={onList ? "Remove from watchlist" : "Add to watchlist"}
+                onClick={toggleWatchlist}
+              >
+                {onList ? <BookmarkCheck className="text-primary" /> : <Bookmark />}
               </Button>
             )}
             {actions.length > 0 && (

@@ -32,6 +32,7 @@ import { arr, ARR_NAMES, notifyArrConfigChanged, type ArrKind, type ArrStatus } 
 import { notifyQbitConfigChanged, qbit, type QbitVersion } from "@/lib/downloads";
 import { notifySeerrConfigChanged, seerr, type SeerrInfo } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
+import { WATCHLIST_HUB } from "@/lib/watchlist";
 import { SORTS } from "@/screens/LibraryView";
 
 /** The GitHub Pages build, which reaches servers at home from the page itself. */
@@ -304,7 +305,8 @@ function HomeRows({ prefs }: { prefs: Prefs }) {
     type: "",
     Metadata: [],
   }));
-  const rows = arrangeHubs([...hubs, ...custom], prefs, true);
+  const watch: Hub = { hubIdentifier: WATCHLIST_HUB, title: "Watchlist", type: "", Metadata: [] };
+  const rows = arrangeHubs([...hubs, watch, ...custom], prefs, true);
   const ids = rows.map((h) => h.hubIdentifier);
   const customRow = (id: string) => prefs.customRows.find((r) => customHubId(r) === id);
 

@@ -10,6 +10,7 @@ mod previews;
 mod resources;
 mod server;
 mod subtitles;
+mod watchlist;
 
 pub use auth::{Pin, User};
 pub use client::{ClientInfo, PlexClient};
@@ -20,3 +21,4 @@ pub use previews::PreviewIndex;
 pub use resources::{Connection, Resource};
 pub use server::{LibrarySection, ServerConnection};
 pub use subtitles::SubtitleResult;
+pub use watchlist::discover_id;
