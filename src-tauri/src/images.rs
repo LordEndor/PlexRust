@@ -40,9 +40,7 @@ impl ImageCache {
         c.order.push_back(key.clone());
         c.map.insert(key, value);
         while c.bytes > CACHE_BYTES {
-            let Some(old) = c.order.pop_front() else {
-                break;
-            };
+            let Some(old) = c.order.pop_front() else { break };
             if let Some(v) = c.map.remove(&old) {
                 c.bytes -= v.0.len();
             }
@@ -86,10 +84,7 @@ async fn serve(app: &AppHandle, query: &str) -> Result<(Vec<u8>, String), String
     }
     // Seek-bar thumbnails are already in memory once the player loaded them.
     if let Some(part_id) = bif {
-        let index = app
-            .state::<PreviewStore>()
-            .get(part_id)
-            .ok_or("previews not loaded")?;
+        let index = app.state::<PreviewStore>().get(part_id).ok_or("previews not loaded")?;
         let jpeg = index.frame(frame).ok_or("no such frame")?;
         return Ok((jpeg.to_vec(), "image/jpeg".into()));
     }
@@ -105,13 +100,7 @@ async fn serve(app: &AppHandle, query: &str) -> Result<(Vec<u8>, String), String
     }
 
     let state = app.state::<AppState>();
-    let server = state
-        .settings
-        .lock()
-        .await
-        .server
-        .clone()
-        .ok_or("no server")?;
+    let server = state.settings.lock().await.server.clone().ok_or("no server")?;
     let (bytes, kind) = state
         .plex
         .image(&server, &path, w, h)

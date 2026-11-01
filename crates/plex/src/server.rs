@@ -47,16 +47,8 @@ impl PlexClient {
     /// Probes every connection of `server` at once and keeps the best one
     /// that answers: direct local first, then direct remote, then relay,
     /// fastest within each group.
-    pub async fn connect(
-        &self,
-        server: &Resource,
-        account_token: &str,
-    ) -> Result<ServerConnection> {
-        let token = server
-            .access_token
-            .as_deref()
-            .unwrap_or(account_token)
-            .to_owned();
+    pub async fn connect(&self, server: &Resource, account_token: &str) -> Result<ServerConnection> {
+        let token = server.access_token.as_deref().unwrap_or(account_token).to_owned();
         let probes = server.connections.iter().map(|c| self.probe(c, &token));
         let mut ok: Vec<(&Connection, Duration)> = server
             .connections
@@ -115,12 +107,7 @@ mod tests {
 
     #[test]
     fn prefers_local_ipv4() {
-        let conn = |uri: &str, local, relay, ipv6| Connection {
-            uri: uri.into(),
-            local,
-            relay,
-            ipv6,
-        };
+        let conn = |uri: &str, local, relay, ipv6| Connection { uri: uri.into(), local, relay, ipv6 };
         let ms = Duration::from_millis;
         let mut found = vec![
             (conn("relay", false, true, false), ms(5)),
@@ -159,13 +146,7 @@ impl PlexClient {
         let transcoded = self
             .http
             .get(format!("{}/photo/:/transcode", server.uri))
-            .query(&[
-                ("width", w.as_str()),
-                ("height", &h),
-                ("minSize", "1"),
-                ("upscale", "1"),
-                ("url", path),
-            ])
+            .query(&[("width", w.as_str()), ("height", &h), ("minSize", "1"), ("upscale", "1"), ("url", path)])
             .header("X-Plex-Token", &server.token)
             .header("Accept", "image/*")
             .send()

@@ -17,11 +17,7 @@ pub enum Error {
     #[error("{0} didn't accept the API key. Copy it from {0} under Settings, General.")]
     BadKey(Kind),
     #[error("{kind} rejected the request ({status}): {message}")]
-    Status {
-        kind: Kind,
-        status: StatusCode,
-        message: String,
-    },
+    Status { kind: Kind, status: StatusCode, message: String },
     #[error("that address is {found}, not {expected}")]
     WrongApp { expected: Kind, found: String },
     #[error("\"{0}\" isn't a valid address")]
@@ -157,31 +153,21 @@ impl ArrClient {
             Kind::Sonarr => "radarr",
         };
         if status.app_name.eq_ignore_ascii_case(other) {
-            return Err(Error::WrongApp {
-                expected: self.kind,
-                found: status.app_name,
-            });
+            return Err(Error::WrongApp { expected: self.kind, found: status.app_name });
         }
         Ok(status)
     }
 
     /// Releases between `start` and `end` (`YYYY-MM-DD`, both included).
     pub async fn calendar(&self, start: &str, end: &str) -> Result<Vec<Release>> {
-        let mut query = vec![
-            ("start", start.to_owned()),
-            ("end", end.to_owned()),
-            ("unmonitored", "false".to_owned()),
-        ];
+        let mut query = vec![("start", start.to_owned()), ("end", end.to_owned()), ("unmonitored", "false".to_owned())];
         if self.kind == Kind::Sonarr {
             query.push(("includeSeries", "true".to_owned()));
         }
         let v = self.get("/calendar", &query).await?;
         let items: Vec<Value> = serde_json::from_value(v).map_err(|e| Error::Json(self.kind, e))?;
         Ok(match self.kind {
-            Kind::Radarr => items
-                .iter()
-                .flat_map(|m| movie_releases(m, start, end))
-                .collect(),
+            Kind::Radarr => items.iter().flat_map(|m| movie_releases(m, start, end)).collect(),
             Kind::Sonarr => items.iter().filter_map(episode_release).collect(),
         })
     }
@@ -198,10 +184,7 @@ impl ArrClient {
         }
         let v = self.get("/queue", &query).await?;
         let records = v["records"].as_array().cloned().unwrap_or_default();
-        Ok(records
-            .iter()
-            .filter_map(|r| queue_item(self.kind, r))
-            .collect())
+        Ok(records.iter().filter_map(|r| queue_item(self.kind, r)).collect())
     }
 
     async fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Value> {
@@ -224,11 +207,7 @@ impl ArrClient {
                 .ok()
                 .and_then(|v| v["message"].as_str().map(str::to_owned))
                 .unwrap_or_else(|| text.chars().take(200).collect());
-            return Err(Error::Status {
-                kind: self.kind,
-                status,
-                message,
-            });
+            return Err(Error::Status { kind: self.kind, status, message });
         }
         serde_json::from_str(&text).map_err(|e| Error::Json(self.kind, e))
     }
@@ -272,8 +251,7 @@ fn movie_releases(m: &Value, start: &str, end: &str) -> Vec<Release> {
 fn episode_release(e: &Value) -> Option<Release> {
     let series = &e["series"];
     let air_date_utc = string(&e["airDateUtc"]);
-    let date = string(&e["airDate"])
-        .or_else(|| air_date_utc.as_deref().and_then(day).map(str::to_owned))?;
+    let date = string(&e["airDate"]).or_else(|| air_date_utc.as_deref().and_then(day).map(str::to_owned))?;
     Some(Release {
         id: format!("sonarr-{}", e["id"].as_u64().unwrap_or_default()),
         kind: ReleaseKind::Episode,
@@ -327,10 +305,7 @@ fn queue_item(kind: Kind, r: &Value) -> Option<QueueItem> {
                 kind: ReleaseKind::Episode,
                 title: string(&series["title"]).or_else(|| string(&r["title"]))?,
                 year: series["year"].as_u64().map(|y| y as u32).filter(|y| *y > 0),
-                season_number: [&episode["seasonNumber"], &r["seasonNumber"]]
-                    .into_iter()
-                    .find_map(Value::as_u64)
-                    .map(|n| n as u32),
+                season_number: [&episode["seasonNumber"], &r["seasonNumber"]].into_iter().find_map(Value::as_u64).map(|n| n as u32),
                 episode_number: episode["episodeNumber"].as_u64().map(|n| n as u32),
                 episode_title: string(&episode["title"]).filter(|t| t != "TBA"),
                 poster: image(&series["images"], "poster"),
@@ -343,10 +318,7 @@ fn queue_item(kind: Kind, r: &Value) -> Option<QueueItem> {
 }
 
 fn string(v: &Value) -> Option<String> {
-    v.as_str()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
+    v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned)
 }
 
 /// `2026-10-20T00:00:00Z` → `2026-10-20`.
@@ -393,14 +365,8 @@ mod tests {
 
     #[test]
     fn normalizes_addresses() {
-        assert_eq!(
-            normalize_url("192.168.1.109:7878/").unwrap(),
-            "http://192.168.1.109:7878"
-        );
-        assert_eq!(
-            normalize_url("https://nas/sonarr/api/v3").unwrap(),
-            "https://nas/sonarr"
-        );
+        assert_eq!(normalize_url("192.168.1.109:7878/").unwrap(), "http://192.168.1.109:7878");
+        assert_eq!(normalize_url("https://nas/sonarr/api/v3").unwrap(), "https://nas/sonarr");
         assert!(normalize_url("  ").is_err());
         assert!(normalize_url("ftp://nas").is_err());
     }

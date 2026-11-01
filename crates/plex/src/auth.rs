@@ -70,12 +70,7 @@ impl PlexClient {
     pub async fn wait_for_token(&self, pin: &Pin, timeout: Duration) -> Result<String> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            if let Some(token) = self
-                .check_pin(pin.id)
-                .await?
-                .auth_token
-                .filter(|t| !t.is_empty())
-            {
+            if let Some(token) = self.check_pin(pin.id).await?.auth_token.filter(|t| !t.is_empty()) {
                 return Ok(token);
             }
             if tokio::time::Instant::now() >= deadline {
@@ -100,9 +95,7 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -124,11 +117,7 @@ mod tests {
             device_name: "pc".into(),
         })
         .unwrap();
-        let pin = Pin {
-            id: 1,
-            code: "XYZ".into(),
-            auth_token: None,
-        };
+        let pin = Pin { id: 1, code: "XYZ".into(), auth_token: None };
         assert_eq!(
             client.auth_url(&pin),
             "https://app.plex.tv/auth#?clientID=abc-123&code=XYZ&context%5Bdevice%5D%5Bproduct%5D=Plex%20Rust"
@@ -137,9 +126,7 @@ mod tests {
 
     #[test]
     fn pin_parses_null_token() {
-        let pin: Pin =
-            serde_json::from_str(r#"{"id":5,"code":"c","authToken":null,"expiresIn":900}"#)
-                .unwrap();
+        let pin: Pin = serde_json::from_str(r#"{"id":5,"code":"c","authToken":null,"expiresIn":900}"#).unwrap();
         assert_eq!(pin.auth_token, None);
     }
 }

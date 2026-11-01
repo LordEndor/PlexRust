@@ -45,19 +45,13 @@ fn saved(s: &mut Settings, kind: Kind) -> &mut ArrSettings {
 }
 
 fn config(s: &ArrSettings) -> ServerConfig {
-    ServerConfig {
-        url: s.url.clone(),
-        has_api_key: !s.api_key.is_empty(),
-    }
+    ServerConfig { url: s.url.clone(), has_api_key: !s.api_key.is_empty() }
 }
 
 #[tauri::command]
 pub async fn arr_config(state: State<'_, AppState>) -> CmdResult<ArrConfig> {
     let s = state.settings.lock().await;
-    Ok(ArrConfig {
-        radarr: config(&s.radarr),
-        sonarr: config(&s.sonarr),
-    })
+    Ok(ArrConfig { radarr: config(&s.radarr), sonarr: config(&s.sonarr) })
 }
 
 /// Saves the server once it answers. An empty `api_key` keeps the saved one.
@@ -71,20 +65,12 @@ pub async fn arr_connect(
     let url = arr::normalize_url(&url).map_err(err)?;
     let key = match api_key.filter(|k| !k.trim().is_empty()) {
         Some(k) => k.trim().to_owned(),
-        None => saved(&mut *state.settings.lock().await, kind)
-            .api_key
-            .clone(),
+        None => saved(&mut *state.settings.lock().await, kind).api_key.clone(),
     };
     if key.is_empty() {
-        return Err(format!(
-            "Enter the API key from {kind} under Settings, General."
-        ));
+        return Err(format!("Enter the API key from {kind} under Settings, General."));
     }
-    let status = ArrClient::new(kind, &url, &key)
-        .map_err(err)?
-        .status()
-        .await
-        .map_err(err)?;
+    let status = ArrClient::new(kind, &url, &key).map_err(err)?.status().await.map_err(err)?;
     let mut s = state.settings.lock().await;
     *saved(&mut s, kind) = ArrSettings { url, api_key: key };
     s.save(&state.settings_path).map_err(err)?;
@@ -100,53 +86,30 @@ pub async fn arr_disconnect(state: State<'_, AppState>, kind: Kind) -> CmdResult
 
 /// Releases between `start` and `end` (`YYYY-MM-DD`) from both servers.
 #[tauri::command]
-pub async fn arr_calendar(
-    state: State<'_, AppState>,
-    start: String,
-    end: String,
-) -> CmdResult<Calendar> {
+pub async fn arr_calendar(state: State<'_, AppState>, start: String, end: String) -> CmdResult<Calendar> {
     let servers = {
         let s = state.settings.lock().await;
-        [
-            (Kind::Radarr, s.radarr.clone()),
-            (Kind::Sonarr, s.sonarr.clone()),
-        ]
+        [(Kind::Radarr, s.radarr.clone()), (Kind::Sonarr, s.sonarr.clone())]
     };
     let (radarr, sonarr) = tokio::join!(
         fetch(Kind::Radarr, &servers[0].1, &start, &end),
         fetch(Kind::Sonarr, &servers[1].1, &start, &end),
     );
-    let mut calendar = Calendar {
-        releases: Vec::new(),
-        errors: Vec::new(),
-    };
+    let mut calendar = Calendar { releases: Vec::new(), errors: Vec::new() };
     for (source, result) in [radarr, sonarr].into_iter().flatten() {
         match result {
             Ok(releases) => calendar.releases.extend(releases),
-            Err(e) => calendar.errors.push(SourceError {
-                source,
-                message: e.to_string(),
-            }),
+            Err(e) => calendar.errors.push(SourceError { source, message: e.to_string() }),
         }
     }
     calendar.releases.sort_by(|a, b| {
-        (&a.date, &a.air_date_utc, &a.title, a.episode_number).cmp(&(
-            &b.date,
-            &b.air_date_utc,
-            &b.title,
-            b.episode_number,
-        ))
+        (&a.date, &a.air_date_utc, &a.title, a.episode_number).cmp(&(&b.date, &b.air_date_utc, &b.title, b.episode_number))
     });
     Ok(calendar)
 }
 
 /// None when the server isn't set up.
-async fn fetch(
-    kind: Kind,
-    c: &ArrSettings,
-    start: &str,
-    end: &str,
-) -> Option<(Kind, arr::Result<Vec<Release>>)> {
+async fn fetch(kind: Kind, c: &ArrSettings, start: &str, end: &str) -> Option<(Kind, arr::Result<Vec<Release>>)> {
     if c.url.is_empty() {
         return None;
     }

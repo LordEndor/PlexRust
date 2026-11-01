@@ -18,9 +18,7 @@ pub enum Error {
     Http(#[from] reqwest::Error),
     #[error("Seerr rejected the request ({status}): {message}")]
     Status { status: StatusCode, message: String },
-    #[error(
-        "Seerr didn't accept your Plex account. Check that Plex sign-in is enabled in Seerr and that your account has been imported, or use an API key."
-    )]
+    #[error("Seerr didn't accept your Plex account. Check that Plex sign-in is enabled in Seerr and that your account has been imported, or use an API key.")]
     PlexSignIn,
     #[error("\"{0}\" isn't a valid Seerr address")]
     BadUrl(String),
@@ -72,17 +70,12 @@ pub struct User {
 
 impl User {
     pub fn name(&self) -> String {
-        [
-            &self.display_name,
-            &self.username,
-            &self.plex_username,
-            &self.email,
-        ]
-        .into_iter()
-        .flatten()
-        .find(|s| !s.is_empty())
-        .cloned()
-        .unwrap_or_else(|| format!("User {}", self.id))
+        [&self.display_name, &self.username, &self.plex_username, &self.email]
+            .into_iter()
+            .flatten()
+            .find(|s| !s.is_empty())
+            .cloned()
+            .unwrap_or_else(|| format!("User {}", self.id))
     }
 }
 
@@ -154,12 +147,7 @@ impl Browse {
             MediaType::Tv => ("firstAirDateGte", "firstAirDateLte"),
         };
         let mut q = vec![("page", page.to_string())];
-        let nonempty = |s: &Option<String>| {
-            s.as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-        };
+        let nonempty = |s: &Option<String>| s.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
         if let Some(v) = nonempty(&self.sort_by) {
             q.push(("sortBy", v));
         }
@@ -208,13 +196,9 @@ impl SeerrClient {
     /// Checks the server answers and who we are signed in as.
     pub async fn info(&self) -> Result<Info> {
         let status = self.get("/status", &[]).await?;
-        let user: User =
-            serde_json::from_value(self.get("/auth/me", &[]).await?).map_err(bad_json)?;
+        let user: User = serde_json::from_value(self.get("/auth/me", &[]).await?).map_err(bad_json)?;
         // Listing services needs admin rights; without them, assume no 4K.
-        let (radarr, sonarr) = futures::join!(
-            self.get("/service/radarr", &[]),
-            self.get("/service/sonarr", &[])
-        );
+        let (radarr, sonarr) = futures::join!(self.get("/service/radarr", &[]), self.get("/service/sonarr", &[]));
         Ok(Info {
             version: status["version"].as_str().unwrap_or_default().to_owned(),
             user_name: user.name(),
@@ -225,11 +209,7 @@ impl SeerrClient {
     }
 
     pub async fn search(&self, query: &str, page: u32) -> Result<Value> {
-        self.get(
-            "/search",
-            &[("query", query.to_owned()), ("page", page.to_string())],
-        )
-        .await
+        self.get("/search", &[("query", query.to_owned()), ("page", page.to_string())]).await
     }
 
     /// One page of a row from [`DISCOVER_ROWS`], by its key.
@@ -257,15 +237,13 @@ impl SeerrClient {
 
     /// TMDB's movie or show genres, as `[{ id, name }]`.
     pub async fn genres(&self, media_type: MediaType) -> Result<Value> {
-        self.get(&format!("/genres/{}", media_type.as_str()), &[])
-            .await
+        self.get(&format!("/genres/{}", media_type.as_str()), &[]).await
     }
 
     /// Movie or show details, including `mediaInfo` with what's available
     /// and requested already.
     pub async fn details(&self, media_type: MediaType, tmdb_id: u64) -> Result<Value> {
-        self.get(&format!("/{}/{tmdb_id}", media_type.as_str()), &[])
-            .await
+        self.get(&format!("/{}/{tmdb_id}", media_type.as_str()), &[]).await
     }
 
     /// How many requests the user has left, per media type.
@@ -334,8 +312,7 @@ impl SeerrClient {
 
     /// Withdraws a request that hasn't been approved yet.
     pub async fn cancel(&self, request_id: u64) -> Result<()> {
-        self.send(Method::DELETE, &format!("/request/{request_id}"), &[], None)
-            .await?;
+        self.send(Method::DELETE, &format!("/request/{request_id}"), &[], None).await?;
         Ok(())
     }
 
@@ -343,20 +320,12 @@ impl SeerrClient {
         self.send(Method::GET, path, query, None).await
     }
 
-    async fn send(
-        &self,
-        method: Method,
-        path: &str,
-        query: &[(&str, String)],
-        body: Option<&Value>,
-    ) -> Result<Value> {
+    async fn send(&self, method: Method, path: &str, query: &[(&str, String)], body: Option<&Value>) -> Result<Value> {
         self.ensure_signed_in().await?;
         let resp = self.build(method.clone(), path, query, body).send().await?;
         // The session cookie expired or Seerr restarted: sign in again once.
-        let resp = if matches!(
-            resp.status(),
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
-        ) && matches!(self.auth, Auth::Plex(_))
+        let resp = if matches!(resp.status(), StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+            && matches!(self.auth, Auth::Plex(_))
         {
             self.sign_in().await?;
             self.build(method, path, query, body).send().await?
@@ -371,13 +340,7 @@ impl SeerrClient {
         serde_json::from_str(&text).map_err(bad_json)
     }
 
-    fn build(
-        &self,
-        method: Method,
-        path: &str,
-        query: &[(&str, String)],
-        body: Option<&Value>,
-    ) -> reqwest::RequestBuilder {
+    fn build(&self, method: Method, path: &str, query: &[(&str, String)], body: Option<&Value>) -> reqwest::RequestBuilder {
         let mut url = format!("{}{path}", self.api);
         for (i, (k, v)) in query.iter().enumerate() {
             url.push(if i == 0 { '?' } else { '&' });
@@ -385,10 +348,7 @@ impl SeerrClient {
             url.push('=');
             url.push_str(&encode(v));
         }
-        let mut req = self
-            .http
-            .request(method, url)
-            .header("Accept", "application/json");
+        let mut req = self.http.request(method, url).header("Accept", "application/json");
         if let Auth::ApiKey(key) = &self.auth {
             req = req.header("X-Api-Key", key);
         }
@@ -419,9 +379,7 @@ impl SeerrClient {
     }
 
     async fn sign_in_locked(&self) -> Result<()> {
-        let Auth::Plex(token) = &self.auth else {
-            return Ok(());
-        };
+        let Auth::Plex(token) = &self.auth else { return Ok(()) };
         let resp = self
             .http
             .post(format!("{}/auth/plex", self.api))
@@ -478,17 +436,10 @@ fn has_4k(services: &Value) -> bool {
 
 /// Copies the title, year and poster of `details` onto a request.
 fn add_summary(request: &mut Value, details: &Value) {
-    let title = details["title"]
-        .as_str()
-        .or_else(|| details["name"].as_str());
-    let date = details["releaseDate"]
-        .as_str()
-        .or_else(|| details["firstAirDate"].as_str());
+    let title = details["title"].as_str().or_else(|| details["name"].as_str());
+    let date = details["releaseDate"].as_str().or_else(|| details["firstAirDate"].as_str());
     request["title"] = title.map(Value::from).unwrap_or(Value::Null);
-    request["year"] = date
-        .and_then(|d| d.get(..4))
-        .map(Value::from)
-        .unwrap_or(Value::Null);
+    request["year"] = date.and_then(|d| d.get(..4)).map(Value::from).unwrap_or(Value::Null);
     request["posterPath"] = details["posterPath"].clone();
 }
 
@@ -505,10 +456,7 @@ async fn check(resp: reqwest::Response) -> Result<reqwest::Response> {
         return Ok(resp);
     }
     let body = resp.text().await.unwrap_or_default();
-    Err(Error::Status {
-        status,
-        message: error_message(&body),
-    })
+    Err(Error::Status { status, message: error_message(&body) })
 }
 
 /// Seerr answers errors with `{"message": …}`, or `{"error": …}` from older
@@ -516,12 +464,7 @@ async fn check(resp: reqwest::Response) -> Result<reqwest::Response> {
 fn error_message(body: &str) -> String {
     serde_json::from_str::<Value>(body)
         .ok()
-        .and_then(|v| {
-            v["message"]
-                .as_str()
-                .or_else(|| v["error"].as_str())
-                .map(str::to_owned)
-        })
+        .and_then(|v| v["message"].as_str().or_else(|| v["error"].as_str()).map(str::to_owned))
         .unwrap_or_else(|| body.chars().take(200).collect())
 }
 
@@ -531,22 +474,10 @@ mod tests {
 
     #[test]
     fn normalizes_pasted_addresses() {
-        assert_eq!(
-            normalize_url("192.168.1.109:5055").unwrap(),
-            "http://192.168.1.109:5055"
-        );
-        assert_eq!(
-            normalize_url(" http://192.168.1.109:5055/ ").unwrap(),
-            "http://192.168.1.109:5055"
-        );
-        assert_eq!(
-            normalize_url("https://seerr.example.com/api/v1/").unwrap(),
-            "https://seerr.example.com"
-        );
-        assert_eq!(
-            normalize_url("https://example.com/seerr").unwrap(),
-            "https://example.com/seerr"
-        );
+        assert_eq!(normalize_url("192.168.1.109:5055").unwrap(), "http://192.168.1.109:5055");
+        assert_eq!(normalize_url(" http://192.168.1.109:5055/ ").unwrap(), "http://192.168.1.109:5055");
+        assert_eq!(normalize_url("https://seerr.example.com/api/v1/").unwrap(), "https://seerr.example.com");
+        assert_eq!(normalize_url("https://example.com/seerr").unwrap(), "https://example.com/seerr");
         assert!(normalize_url("").is_err());
         assert!(normalize_url("ftp://host").is_err());
     }
@@ -560,10 +491,7 @@ mod tests {
 
     #[test]
     fn reads_error_messages() {
-        assert_eq!(
-            error_message(r#"{"message":"Request already exists"}"#),
-            "Request already exists"
-        );
+        assert_eq!(error_message(r#"{"message":"Request already exists"}"#), "Request already exists");
         assert_eq!(error_message(r#"{"error":"Unauthorized"}"#), "Unauthorized");
         assert_eq!(error_message("Bad Gateway"), "Bad Gateway");
     }
@@ -571,19 +499,13 @@ mod tests {
     #[test]
     fn summarizes_requests() {
         let mut movie = serde_json::json!({ "id": 1 });
-        add_summary(
-            &mut movie,
-            &serde_json::json!({ "title": "Dune", "releaseDate": "2021-09-15", "posterPath": "/d.jpg" }),
-        );
+        add_summary(&mut movie, &serde_json::json!({ "title": "Dune", "releaseDate": "2021-09-15", "posterPath": "/d.jpg" }));
         assert_eq!(movie["title"], "Dune");
         assert_eq!(movie["year"], "2021");
         assert_eq!(movie["posterPath"], "/d.jpg");
 
         let mut show = serde_json::json!({ "id": 2 });
-        add_summary(
-            &mut show,
-            &serde_json::json!({ "name": "Severance", "firstAirDate": "2022-02-18" }),
-        );
+        add_summary(&mut show, &serde_json::json!({ "name": "Severance", "firstAirDate": "2022-02-18" }));
         assert_eq!(show["title"], "Severance");
         assert_eq!(show["year"], "2022");
         assert!(show["posterPath"].is_null());
@@ -606,38 +528,21 @@ mod tests {
                 ("voteCountGte", "200".to_owned()),
             ]
         );
-        let tv = Browse {
-            date_to: Some("2019-12-31".into()),
-            ..Default::default()
-        };
-        assert_eq!(
-            tv.query(MediaType::Tv, 1),
-            vec![
-                ("page", "1".to_owned()),
-                ("firstAirDateLte", "2019-12-31".to_owned())
-            ]
-        );
-        assert_eq!(
-            Browse::default().query(MediaType::Movie, 1),
-            vec![("page", "1".to_owned())]
-        );
+        let tv = Browse { date_to: Some("2019-12-31".into()), ..Default::default() };
+        assert_eq!(tv.query(MediaType::Tv, 1), vec![("page", "1".to_owned()), ("firstAirDateLte", "2019-12-31".to_owned())]);
+        assert_eq!(Browse::default().query(MediaType::Movie, 1), vec![("page", "1".to_owned())]);
     }
 
     #[test]
     fn spots_4k_services() {
-        assert!(has_4k(
-            &serde_json::json!([{ "is4k": false }, { "is4k": true }])
-        ));
+        assert!(has_4k(&serde_json::json!([{ "is4k": false }, { "is4k": true }])));
         assert!(!has_4k(&serde_json::json!([{ "is4k": false }])));
         assert!(!has_4k(&serde_json::json!({ "message": "Forbidden" })));
     }
 
     #[test]
     fn reads_request_bodies_from_the_app() {
-        let r: NewRequest = serde_json::from_value(
-            serde_json::json!({ "mediaType": "tv", "tmdbId": 95396, "seasons": [1, 2] }),
-        )
-        .unwrap();
+        let r: NewRequest = serde_json::from_value(serde_json::json!({ "mediaType": "tv", "tmdbId": 95396, "seasons": [1, 2] })).unwrap();
         assert_eq!(r.media_type, MediaType::Tv);
         assert_eq!(r.seasons, vec![1, 2]);
         assert!(!r.is_4k);

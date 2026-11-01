@@ -5,10 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use plex::{
-    Chapter, Marker, Metadata, Part, PreviewIndex, ServerConnection, SubtitleResult,
-    TranscodeOptions,
-};
+use plex::{Chapter, Marker, Metadata, Part, PreviewIndex, ServerConnection, SubtitleResult, TranscodeOptions};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -57,12 +54,7 @@ pub async fn load_previews(
         Some(index) => index,
         None => {
             let server = current_server(&state).await?;
-            let Some(index) = state
-                .plex
-                .preview_index(&server, part_id)
-                .await
-                .map_err(err)?
-            else {
+            let Some(index) = state.plex.preview_index(&server, part_id).await.map_err(err)? else {
                 return Ok(None);
             };
             let index = Arc::new(index);
@@ -70,19 +62,12 @@ pub async fn load_previews(
             index
         }
     };
-    Ok((!index.is_empty()).then(|| PreviewInfo {
-        count: index.len(),
-        interval_ms: index.interval_ms,
-    }))
+    Ok((!index.is_empty()).then(|| PreviewInfo { count: index.len(), interval_ms: index.interval_ms }))
 }
 
 /// Saves the audio and subtitle picks for a show, for its next episodes.
 #[tauri::command]
-pub async fn remember_tracks(
-    state: State<'_, AppState>,
-    key: String,
-    choice: TrackChoice,
-) -> CmdResult<()> {
+pub async fn remember_tracks(state: State<'_, AppState>, key: String, choice: TrackChoice) -> CmdResult<()> {
     let mut s = state.settings.lock().await;
     s.tracks.insert(key, choice);
     s.save(&state.settings_path).map_err(err)
@@ -162,10 +147,11 @@ pub struct PlaybackInfo {
 /// mpv ships inside the installer under `mpv/`; in development fall back to
 /// whatever `mpv` is on PATH.
 fn mpv_path(app: &AppHandle) -> String {
-    let bundled: Option<PathBuf> = app.path().resource_dir().ok().map(|d| {
-        d.join("mpv")
-            .join(if cfg!(windows) { "mpv.exe" } else { "mpv" })
-    });
+    let bundled: Option<PathBuf> = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|d| d.join("mpv").join(if cfg!(windows) { "mpv.exe" } else { "mpv" }));
     match bundled {
         Some(p) if p.exists() => p.to_string_lossy().into_owned(),
         _ => "mpv".into(),
@@ -209,10 +195,7 @@ pub async fn playback_info(
         .first()
         .and_then(|m| m.part.first())
         .ok_or("This item has no playable file")?;
-    let key = part
-        .key
-        .as_deref()
-        .ok_or("This item has no playable file")?;
+    let key = part.key.as_deref().ok_or("This item has no playable file")?;
 
     let external_subtitles = external_subtitles(&state, &server, part);
 
@@ -221,10 +204,7 @@ pub async fn playback_info(
         .iter()
         .any(|s| s.stream_type == Some(1) && s.dovi_profile == Some(7));
 
-    let track_key = item
-        .grandparent_rating_key
-        .clone()
-        .unwrap_or_else(|| item.rating_key.clone());
+    let track_key = item.grandparent_rating_key.clone().unwrap_or_else(|| item.rating_key.clone());
 
     let subtitle = match item.kind.as_str() {
         "episode" => Some(episode_label(&item)),
@@ -234,16 +214,8 @@ pub async fn playback_info(
     // Missing episode info only costs the episode buttons and Up Next, so
     // errors are dropped. Played from a playlist, the playlist is the queue.
     let (previous, queue) = match (&playlist, item.kind.as_str()) {
-        (Some(p), _) => state
-            .plex
-            .playlist_neighbours(&server, p, &item.rating_key)
-            .await
-            .unwrap_or_default(),
-        (None, "episode") => state
-            .plex
-            .episode_neighbours(&server, &item)
-            .await
-            .unwrap_or_default(),
+        (Some(p), _) => state.plex.playlist_neighbours(&server, p, &item.rating_key).await.unwrap_or_default(),
+        (None, "episode") => state.plex.episode_neighbours(&server, &item).await.unwrap_or_default(),
         _ => Default::default(),
     };
     let previous = previous.map(NextUp::from);
@@ -282,23 +254,14 @@ pub async fn transcode_url(
     session: String,
 ) -> CmdResult<String> {
     let server = current_server(&state).await?;
-    let opts = TranscodeOptions {
-        max_bitrate_kbps,
-        resolution,
-        offset_secs,
-        session,
-    };
+    let opts = TranscodeOptions { max_bitrate_kbps, resolution, offset_secs, session };
     Ok(state.plex.transcode_url(&server, &rating_key, &opts))
 }
 
 #[tauri::command]
 pub async fn stop_transcode(state: State<'_, AppState>, session: String) -> CmdResult<()> {
     let server = current_server(&state).await?;
-    state
-        .plex
-        .stop_transcode(&server, &session)
-        .await
-        .map_err(err)
+    state.plex.stop_transcode(&server, &session).await.map_err(err)
 }
 
 /// Reports playback position. On `stopped` past 90% the item is also marked
@@ -318,11 +281,7 @@ pub async fn report_progress(
         .await
         .map_err(err)?;
     if playback_state == "stopped" && duration_ms > 0 && time_ms * 10 >= duration_ms * 9 {
-        state
-            .plex
-            .scrobble(&server, &rating_key)
-            .await
-            .map_err(err)?;
+        state.plex.scrobble(&server, &rating_key).await.map_err(err)?;
     }
     Ok(())
 }
@@ -366,11 +325,7 @@ pub async fn subtitle_search(
 /// Downloads a search result into Plex and waits for it to show up on the
 /// item, then returns every external subtitle the item now has.
 #[tauri::command]
-pub async fn subtitle_download(
-    state: State<'_, AppState>,
-    rating_key: String,
-    key: String,
-) -> CmdResult<Vec<Subtitle>> {
+pub async fn subtitle_download(state: State<'_, AppState>, rating_key: String, key: String) -> CmdResult<Vec<Subtitle>> {
     let server = current_server(&state).await?;
     let current = |item: Option<Metadata>| {
         item.and_then(|i| i.media.into_iter().next())
@@ -378,35 +333,15 @@ pub async fn subtitle_download(
             .map(|p| external_subtitles(&state, &server, &p))
             .unwrap_or_default()
     };
-    let before = current(
-        state
-            .plex
-            .metadata(&server, &rating_key)
-            .await
-            .map_err(err)?,
-    )
-    .len();
-    state
-        .plex
-        .download_subtitle(&server, &rating_key, &key)
-        .await
-        .map_err(err)?;
+    let before = current(state.plex.metadata(&server, &rating_key).await.map_err(err)?).len();
+    state.plex.download_subtitle(&server, &rating_key, &key).await.map_err(err)?;
     // Plex fetches the file in the background, usually within a few seconds.
     for _ in 0..20 {
         tokio::time::sleep(std::time::Duration::from_millis(750)).await;
-        let subs = current(
-            state
-                .plex
-                .metadata(&server, &rating_key)
-                .await
-                .map_err(err)?,
-        );
+        let subs = current(state.plex.metadata(&server, &rating_key).await.map_err(err)?);
         if subs.len() > before {
             return Ok(subs);
         }
     }
-    Err(
-        "Plex accepted the subtitle but it didn't appear on the item. Try again in a moment."
-            .into(),
-    )
+    Err("Plex accepted the subtitle but it didn't appear on the item. Try again in a moment.".into())
 }

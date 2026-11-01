@@ -52,11 +52,7 @@ pub async fn auth_start(state: State<'_, AppState>) -> CmdResult<AuthStart> {
 /// account token.
 #[tauri::command]
 pub async fn auth_wait(state: State<'_, AppState>, pin_id: u64, code: String) -> CmdResult<User> {
-    let pin = Pin {
-        id: pin_id,
-        code,
-        auth_token: None,
-    };
+    let pin = Pin { id: pin_id, code, auth_token: None };
     let token = state
         .plex
         .wait_for_token(&pin, Duration::from_secs(10 * 60))
@@ -71,10 +67,7 @@ pub async fn auth_wait(state: State<'_, AppState>, pin_id: u64, code: String) ->
 }
 
 #[tauri::command]
-pub async fn sign_out(
-    state: State<'_, AppState>,
-    seerr: State<'_, crate::requests::SeerrState>,
-) -> CmdResult<()> {
+pub async fn sign_out(state: State<'_, AppState>, seerr: State<'_, crate::requests::SeerrState>) -> CmdResult<()> {
     // The Seerr session belongs to this Plex account.
     seerr.forget().await;
     let mut s = state.settings.lock().await;
@@ -123,10 +116,7 @@ pub async fn list_servers(state: State<'_, AppState>) -> CmdResult<Vec<ServerSum
 }
 
 #[tauri::command]
-pub async fn select_server(
-    state: State<'_, AppState>,
-    machine_id: String,
-) -> CmdResult<ServerConnection> {
+pub async fn select_server(state: State<'_, AppState>, machine_id: String) -> CmdResult<ServerConnection> {
     let token = account_token(&state).await?;
     let servers = state.plex.servers(&token).await.map_err(err)?;
     let server = servers
@@ -188,20 +178,10 @@ pub async fn section_items(
             .map_err(err);
     }
 
-    let key = format!(
-        "{}|{section}|{sort}|{}",
-        server.machine_id,
-        serde_json::to_string(&filters).map_err(err)?
-    );
+    let key = format!("{}|{section}|{sort}|{}", server.machine_id, serde_json::to_string(&filters).map_err(err)?);
     // Random order is shuffled again each time the grid starts from the top.
     let reshuffle = sort.starts_with("random") && start == 0;
-    let cached = filtered
-        .0
-        .lock()
-        .unwrap()
-        .as_ref()
-        .filter(|(k, _)| *k == key && !reshuffle)
-        .map(|(_, v)| v.clone());
+    let cached = filtered.0.lock().unwrap().as_ref().filter(|(k, _)| *k == key && !reshuffle).map(|(_, v)| v.clone());
     let all = match cached {
         Some(all) => all,
         None => {
@@ -215,32 +195,16 @@ pub async fn section_items(
             all
         }
     };
-    let items = all
-        .iter()
-        .skip(start as usize)
-        .take(size as usize)
-        .cloned()
-        .collect();
-    Ok(Page {
-        items,
-        total: all.len() as u32,
-    })
+    let items = all.iter().skip(start as usize).take(size as usize).cloned().collect();
+    Ok(Page { items, total: all.len() as u32 })
 }
 
 /// How many movies or shows a library holds, or with `kind` how many items
 /// of that Plex type (4 for episodes).
 #[tauri::command]
-pub async fn section_count(
-    state: State<'_, AppState>,
-    section: String,
-    kind: Option<u8>,
-) -> CmdResult<u32> {
+pub async fn section_count(state: State<'_, AppState>, section: String, kind: Option<u8>) -> CmdResult<u32> {
     let server = current_server(&state).await?;
-    state
-        .plex
-        .section_total(&server, &section, kind)
-        .await
-        .map_err(err)
+    state.plex.section_total(&server, &section, kind).await.map_err(err)
 }
 
 #[tauri::command]
@@ -261,34 +225,19 @@ pub async fn playlist(state: State<'_, AppState>, rating_key: String) -> CmdResu
 }
 
 #[tauri::command]
-pub async fn playlist_items(
-    state: State<'_, AppState>,
-    rating_key: String,
-) -> CmdResult<Vec<Metadata>> {
+pub async fn playlist_items(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
     let server = current_server(&state).await?;
-    state
-        .plex
-        .playlist_items(&server, &rating_key)
-        .await
-        .map_err(err)
+    state.plex.playlist_items(&server, &rating_key).await.map_err(err)
 }
 
 /// Genres or decades a library can be filtered by.
 #[tauri::command]
-pub async fn filter_values(
-    state: State<'_, AppState>,
-    section: String,
-    field: String,
-) -> CmdResult<Vec<Directory>> {
+pub async fn filter_values(state: State<'_, AppState>, section: String, field: String) -> CmdResult<Vec<Directory>> {
     if !matches!(field.as_str(), "genre" | "decade") {
         return Err(format!("unknown filter {field}"));
     }
     let server = current_server(&state).await?;
-    state
-        .plex
-        .filter_values(&server, &section, &field)
-        .await
-        .map_err(err)
+    state.plex.filter_values(&server, &section, &field).await.map_err(err)
 }
 
 #[tauri::command]
@@ -298,51 +247,26 @@ pub async fn collections(state: State<'_, AppState>, section: String) -> CmdResu
 }
 
 #[tauri::command]
-pub async fn collection_items(
-    state: State<'_, AppState>,
-    rating_key: String,
-) -> CmdResult<Vec<Metadata>> {
+pub async fn collection_items(state: State<'_, AppState>, rating_key: String) -> CmdResult<Vec<Metadata>> {
     let server = current_server(&state).await?;
-    state
-        .plex
-        .collection_items(&server, &rating_key)
-        .await
-        .map_err(err)
+    state.plex.collection_items(&server, &rating_key).await.map_err(err)
 }
 
 #[tauri::command]
-pub async fn set_watched(
-    state: State<'_, AppState>,
-    rating_key: String,
-    watched: bool,
-) -> CmdResult<()> {
+pub async fn set_watched(state: State<'_, AppState>, rating_key: String, watched: bool) -> CmdResult<()> {
     let server = current_server(&state).await?;
-    state
-        .plex
-        .set_watched(&server, &rating_key, watched)
-        .await
-        .map_err(err)
+    state.plex.set_watched(&server, &rating_key, watched).await.map_err(err)
 }
 
 #[tauri::command]
-pub async fn remove_from_continue_watching(
-    state: State<'_, AppState>,
-    rating_key: String,
-) -> CmdResult<()> {
+pub async fn remove_from_continue_watching(state: State<'_, AppState>, rating_key: String) -> CmdResult<()> {
     let server = current_server(&state).await?;
-    state
-        .plex
-        .remove_from_continue_watching(&server, &rating_key)
-        .await
-        .map_err(err)
+    state.plex.remove_from_continue_watching(&server, &rating_key).await.map_err(err)
 }
 
 /// The episode a show or season page's Play button starts.
 #[tauri::command]
-pub async fn up_next(
-    state: State<'_, AppState>,
-    rating_key: String,
-) -> CmdResult<Option<Metadata>> {
+pub async fn up_next(state: State<'_, AppState>, rating_key: String) -> CmdResult<Option<Metadata>> {
     let server = current_server(&state).await?;
     let item = state
         .plex
