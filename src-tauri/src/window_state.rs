@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    Manager, Monitor, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow, WindowEvent,
+    LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow,
+    WindowEvent,
 };
 
 const FILE_NAME: &str = "window-state.json";
@@ -104,7 +105,12 @@ fn on_monitor(monitor: &Monitor, state: &WindowState) -> bool {
 }
 
 fn track<R: Runtime>(window: &WebviewWindow<R>, current: &Mutex<Option<WindowState>>) {
-    if window.is_fullscreen().unwrap_or(false) || window.is_minimized().unwrap_or(false) {
+    // The mini player's small corner window is never saved; the bounds from
+    // before it are, so the app reopens at its normal size.
+    if window.is_fullscreen().unwrap_or(false)
+        || window.is_minimized().unwrap_or(false)
+        || MINI.lock().unwrap().is_some()
+    {
         return;
     }
     let maximized = window.is_maximized().unwrap_or(false);
@@ -133,6 +139,76 @@ fn snapshot<R: Runtime>(window: &WebviewWindow<R>) -> Option<WindowState> {
         height: size.height,
         maximized: false,
     })
+}
+
+/// The window's bounds from before the mini player shrank it, while it's on.
+static MINI: Mutex<Option<WindowState>> = Mutex::new(None);
+
+/// Size of the mini player, in logical pixels (16:9).
+const MINI_SIZE: (f64, f64) = (480.0, 270.0);
+/// Gap between the mini player and the screen's corner, in logical pixels.
+const MINI_MARGIN: f64 = 24.0;
+/// The smallest normal window, as in `tauri.conf.json`.
+const MIN_SIZE: (f64, f64) = (960.0, 600.0);
+
+/// Shrinks the window to a small always-on-top player in the bottom-right
+/// corner of its screen, or puts it back the way it was.
+#[tauri::command]
+pub fn mini_player<R: Runtime>(window: WebviewWindow<R>, on: bool) -> Result<(), String> {
+    let e = |e: tauri::Error| e.to_string();
+    let mut mini = MINI.lock().unwrap();
+    if on {
+        if mini.is_some() {
+            return Ok(());
+        }
+        if window.is_fullscreen().unwrap_or(false) {
+            window.set_fullscreen(false).map_err(e)?;
+        }
+        let maximized = window.is_maximized().unwrap_or(false);
+        if maximized {
+            window.unmaximize().map_err(e)?;
+        }
+        let Some(mut before) = snapshot(&window) else {
+            return Err("Couldn't read the window's size".into());
+        };
+        before.maximized = maximized;
+        *mini = Some(before);
+        drop(mini);
+
+        let monitor = window.current_monitor().map_err(e)?;
+        let scale = window.scale_factor().unwrap_or(1.0);
+        window.set_min_size(None::<PhysicalSize<u32>>).map_err(e)?;
+        window.set_size(LogicalSize::new(MINI_SIZE.0, MINI_SIZE.1)).map_err(e)?;
+        if let Some(m) = monitor {
+            let area = m.work_area();
+            let margin = (MINI_MARGIN * scale) as i32;
+            let (w, h) = ((MINI_SIZE.0 * scale) as i32, (MINI_SIZE.1 * scale) as i32);
+            let x = area.position.x + area.size.width as i32 - w - margin;
+            let y = area.position.y + area.size.height as i32 - h - margin;
+            window.set_position(PhysicalPosition::new(x, y)).map_err(e)?;
+        }
+        window.set_always_on_top(true).map_err(e)?;
+    } else {
+        let Some(before) = mini.take() else {
+            return Ok(());
+        };
+        drop(mini);
+        window.set_always_on_top(false).map_err(e)?;
+        window.set_min_size(Some(LogicalSize::new(MIN_SIZE.0, MIN_SIZE.1))).map_err(e)?;
+        window.set_position(PhysicalPosition::new(before.x, before.y)).map_err(e)?;
+        window.set_size(PhysicalSize::new(before.width, before.height)).map_err(e)?;
+        if before.maximized {
+            window.maximize().map_err(e)?;
+        }
+    }
+    Ok(())
+}
+
+/// Keeps the window above other windows while on, such as while watching
+/// next to other work.
+#[tauri::command]
+pub fn pin_window<R: Runtime>(window: WebviewWindow<R>, on: bool) -> Result<(), String> {
+    window.set_always_on_top(on).map_err(|e| e.to_string())
 }
 
 fn load(path: &Path) -> Option<WindowState> {

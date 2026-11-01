@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   command,
@@ -23,6 +24,9 @@ import {
   Minimize,
   Minus,
   Pause,
+  PictureInPicture2,
+  Pin,
+  PinOff,
   Play,
   Plus,
   RotateCcw,
@@ -106,7 +110,17 @@ const MPV_ARGS = [
   "--sub-auto=no",
   "--audio-display=no",
   "--cursor-autohide=no",
+  // Show what's playing in Windows' media overlay and let media keys and
+  // headset buttons reach the player. The keys are routed back through the
+  // app (see MEDIA_KEYS) so next and previous follow the episode queue.
+  "--media-controls=yes",
 ];
+
+/** mpv key names for media keys, and what the app does with each. */
+const MEDIA_KEYS = { PLAYPAUSE: "toggle", PLAY: "play", PAUSE: "pause", STOP: "stop", NEXT: "next", PREV: "previous" } as const;
+type MediaAction = (typeof MEDIA_KEYS)[keyof typeof MEDIA_KEYS];
+/** The same key press can arrive from both mpv and the window; act once. */
+const MEDIA_DEDUPE_MS = 400;
 
 const REPORT_EVERY_MS = 10_000;
 /** Give up on a file that hasn't started after this long and try transcoding. */
@@ -120,6 +134,18 @@ const HIDE_CONTROLS_MS = 3000;
 // Leaving fullscreen waits a tick after the player closes, so the next
 // episode (a fresh Player mounted in the same render) can cancel it.
 let exitFullscreenTimer: number | undefined;
+// Mini player and always on top carry over to the next episode the same way.
+const windowModes = { mini: false, pinned: false };
+
+function setMini(on: boolean) {
+  windowModes.mini = on;
+  return invoke("mini_player", { on }).catch(() => {});
+}
+
+function setPinned(on: boolean) {
+  windowModes.pinned = on;
+  return invoke("pin_window", { on }).catch(() => {});
+}
 
 interface Track {
   id: number;
@@ -195,6 +221,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const [subDelay, setSubDelay] = useState(0);
   const [subScale, setSubScale] = useState(1);
   const [searchingSubs, setSearchingSubs] = useState(false);
+  const [mini, setMiniState] = useState(windowModes.mini);
+  const [pinned, setPinnedState] = useState(windowModes.pinned);
+  const lastMedia = useRef({ action: "", at: 0 });
   // External subtitles already handed to mpv for the file loaded now.
   const addedSubs = useRef(new Set<string>());
 
@@ -313,6 +342,10 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         const config: MpvConfig = { path: pi.mpvPath, args, observedProperties: OBSERVED, ipcTimeoutMs: 5000 };
         await init(config);
         if (disposed) return destroy();
+        for (const [key, action] of Object.entries(MEDIA_KEYS)) {
+          command("keybind", [key, `script-message plexrust-media ${action}`]).catch(() => {});
+        }
+        setProperty<string>("force-media-title", pi.subtitle ? `${pi.title} · ${pi.subtitle}` : pi.title).catch(() => {});
 
         unlisten.push(
           await observeProperties(OBSERVED, ({ name, data }) => {
@@ -401,6 +434,10 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
 
         unlisten.push(
           await listenEvents((ev) => {
+            if (ev.event === "client-message") {
+              const args = (ev as { args?: string[] }).args ?? [];
+              if (args[0] === "plexrust-media") mediaRef.current(args[1] as MediaAction);
+            }
             if (ev.event === "start-file") {
               applied.current = { audio: false, sub: false };
               addedSubs.current.clear();
@@ -463,6 +500,8 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         getCurrentWindow()
           .setFullscreen(false)
           .catch(() => {});
+        if (windowModes.mini) setMini(false);
+        if (windowModes.pinned) setPinned(false);
       });
     };
   }, []);
@@ -492,7 +531,28 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     return () => window.clearTimeout(t);
   }, [upNext, paused, finish]);
 
+  const toggleMini = useCallback(async () => {
+    const next = !windowModes.mini;
+    if (next) setFullscreen(false);
+    setMiniState(next);
+    await setMini(next);
+    // Back from the mini player, keep the window on top if it was pinned.
+    if (!next && windowModes.pinned) setPinned(true);
+  }, []);
+
+  const togglePinned = useCallback(() => {
+    const next = !windowModes.pinned;
+    setPinnedState(next);
+    // The mini player is always on top anyway; this is for the normal window.
+    if (!windowModes.mini) setPinned(next);
+    else windowModes.pinned = next;
+  }, []);
+
   const toggleFullscreen = useCallback(async () => {
+    if (windowModes.mini) {
+      setMiniState(false);
+      await setMini(false);
+    }
     const win = getCurrentWindow();
     const next = !(await win.isFullscreen());
     await win.setFullscreen(next);
@@ -531,9 +591,53 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     else poke();
   }, [paused, poke]);
 
+  // Media keys, from the keyboard or Windows' media overlay.
+  const onMedia = (action: MediaAction) => {
+    const now = Date.now();
+    if (lastMedia.current.action === action && now - lastMedia.current.at < MEDIA_DEDUPE_MS) return;
+    lastMedia.current = { action, at: now };
+    poke();
+    const { info } = live.current;
+    switch (action) {
+      case "toggle":
+        togglePause();
+        break;
+      case "play":
+        setProperty<boolean>("pause", false).catch(() => {});
+        break;
+      case "pause":
+        setProperty<boolean>("pause", true).catch(() => {});
+        break;
+      case "stop":
+        onClose();
+        break;
+      case "next":
+        if (info?.next) onPlayNext(info.next.ratingKey);
+        break;
+      case "previous":
+        // Like other players: back to the start first, then the previous episode.
+        if (live.current.time > 5 || !info?.previous) seekTo(0);
+        else onPlayNext(info.previous.ratingKey);
+        break;
+    }
+  };
+  const mediaRef = useRef(onMedia);
+  mediaRef.current = onMedia;
+
   useEffect(() => {
     const onKey = async (e: KeyboardEvent) => {
       poke();
+      const media: Record<string, MediaAction> = {
+        MediaPlayPause: "toggle",
+        MediaStop: "stop",
+        MediaTrackNext: "next",
+        MediaTrackPrevious: "previous",
+      };
+      if (media[e.key]) {
+        e.preventDefault();
+        mediaRef.current(media[e.key]);
+        return;
+      }
       // Keys inside an open menu navigate or close the menu, not the player.
       if (document.querySelector('[role="menu"], [role="dialog"]')) return;
       if (e.shiftKey && (e.key === "N" || e.key === "P")) {
@@ -588,15 +692,22 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         case "X":
           command("add", ["audio-delay", e.key === "X" ? DELAY_STEP : -DELAY_STEP]).catch(() => {});
           break;
+        case "p":
+          toggleMini();
+          break;
+        case "t":
+          togglePinned();
+          break;
         case "Escape":
-          if (await getCurrentWindow().isFullscreen()) toggleFullscreen();
+          if (windowModes.mini) toggleMini();
+          else if (await getCurrentWindow().isFullscreen()) toggleFullscreen();
           else onClose();
           break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [poke, togglePause, seekBy, toggleFullscreen, onClose, onPlayNext]);
+  }, [poke, togglePause, seekBy, toggleFullscreen, toggleMini, togglePinned, onClose, onPlayNext]);
 
   const audio = tracks.filter((t) => t.type === "audio");
   const subs = tracks.filter((t) => t.type === "sub");
@@ -674,11 +785,12 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       {upNext && info && !error && (
         <div
           className={cn(
-            "absolute right-8 z-10 flex w-[27rem] gap-4 rounded-2xl border border-white/10 bg-black/85 p-4 text-white shadow-2xl backdrop-blur transition-[bottom] duration-300",
-            controls ? "bottom-36" : "bottom-10",
+            mini ? "absolute right-2 left-2 z-10 flex gap-3 rounded-xl" : "absolute right-8 z-10 flex w-[27rem] gap-4 rounded-2xl",
+            " border border-white/10 bg-black/85 p-4 text-white shadow-2xl backdrop-blur transition-[bottom] duration-300",
+            mini ? (controls ? "bottom-24" : "bottom-2") : controls ? "bottom-36" : "bottom-10",
           )}
         >
-          {info.next?.thumb && (
+          {info.next?.thumb && !mini && (
             <img
               src={imageUrl(server, info.next.thumb, 160, 90)}
               alt=""
@@ -741,19 +853,27 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       >
         <div
           data-tauri-drag-region
-          className="pointer-events-auto absolute inset-x-0 top-0 flex items-center gap-4 bg-gradient-to-b from-black/80 to-transparent px-6 pt-5 pb-16"
+          className={cn(
+            "pointer-events-auto absolute inset-x-0 top-0 flex items-center bg-gradient-to-b from-black/80 to-transparent",
+            mini ? "gap-2 px-2 pt-2 pb-8" : "gap-4 px-6 pt-5 pb-16",
+          )}
         >
-          {!fullscreen && <WindowControls className="absolute top-0 right-0 [&_button]:text-white/80" />}
+          {!fullscreen && !mini && <WindowControls className="absolute top-0 right-0 [&_button]:text-white/80" />}
           <Button variant="ghost" size="icon" onClick={onClose} title="Back (Esc)" className="text-white hover:bg-white/10">
             <ArrowLeft className="size-5" />
           </Button>
           <div className="min-w-0">
-            <div className="truncate text-lg font-semibold text-white">{info?.title}</div>
-            {info?.subtitle && <div className="truncate text-sm text-white/70">{info.subtitle}</div>}
+            <div className={cn("truncate font-semibold text-white", mini ? "text-sm" : "text-lg")}>{info?.title}</div>
+            {info?.subtitle && !mini && <div className="truncate text-sm text-white/70">{info.subtitle}</div>}
           </div>
         </div>
 
-        <div className="pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col gap-3 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pt-20 pb-5">
+        <div
+          className={cn(
+            "pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col bg-gradient-to-t from-black/85 via-black/50 to-transparent",
+            mini ? "gap-1 px-2 pt-10 pb-1" : "gap-3 px-6 pt-20 pb-5",
+          )}
+        >
           <SeekBar time={time} duration={total} onSeek={seekTo} chapters={chapters} previews={previews} />
           <div className="flex items-center gap-1 text-white">
             {episodes && (
@@ -765,15 +885,19 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
                 <SkipBack className="fill-current" />
               </IconButton>
             )}
-            <IconButton title="Back 10s (←)" onClick={() => seekBy(-10)}>
-              <RotateCcw />
-            </IconButton>
+            {!mini && (
+              <IconButton title="Back 10s (←)" onClick={() => seekBy(-10)}>
+                <RotateCcw />
+              </IconButton>
+            )}
             <IconButton title={paused ? "Play (Space)" : "Pause (Space)"} onClick={togglePause} big>
               {paused ? <Play className="fill-current" /> : <Pause className="fill-current" />}
             </IconButton>
-            <IconButton title="Forward 10s (→)" onClick={() => seekBy(10)}>
-              <RotateCw />
-            </IconButton>
+            {!mini && (
+              <IconButton title="Forward 10s (→)" onClick={() => seekBy(10)}>
+                <RotateCw />
+              </IconButton>
+            )}
             {episodes && (
               <IconButton
                 title="Next episode (Shift+N)"
@@ -783,7 +907,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
                 <SkipForward className="fill-current" />
               </IconButton>
             )}
-            <span className="ml-3 text-sm text-white/80 tabular-nums">
+            <span className={cn("text-white/80 tabular-nums", mini ? "ml-1 text-xs" : "ml-3 text-sm")}>
               {formatTime(time)} / {formatTime(total)}
             </span>
 
@@ -792,54 +916,72 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
             <IconButton title="Mute (M)" onClick={() => command("cycle", ["mute"]).catch(() => {})}>
               {muted || volume === 0 ? <VolumeX /> : <Volume2 />}
             </IconButton>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={muted ? 0 : volume}
-              onChange={(e) => {
-                setProperty<number>("volume", Number(e.target.value)).catch(() => {});
-                if (muted) setProperty<boolean>("mute", false).catch(() => {});
-              }}
-              className="accent-primary mr-2 w-24"
-              title="Volume (↑/↓)"
-            />
+            {!mini && (
+              <>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={muted ? 0 : volume}
+                onChange={(e) => {
+                  setProperty<number>("volume", Number(e.target.value)).catch(() => {});
+                  if (muted) setProperty<boolean>("mute", false).catch(() => {});
+                }}
+                className="accent-primary mr-2 w-24"
+                title="Volume (↑/↓)"
+              />
 
-            {info && info.queue.length > 0 && (
-              <QueueMenu queue={info.queue} onPlay={(ep) => onPlayNext(ep.ratingKey)} />
+              {info && info.queue.length > 0 && (
+                <QueueMenu queue={info.queue} onPlay={(ep) => onPlayNext(ep.ratingKey)} />
+              )}
+              {chapters.length > 1 && <ChapterMenu chapters={chapters} time={time} previews={previews} onSeek={seekTo} />}
+              <TrackMenu icon={<AudioLines />} title="Audio" tracks={audio} onPick={(id) => pickTrack("audio", id)} />
+              <TrackMenu
+                icon={<Captions />}
+                title="Subtitles"
+                tracks={subs}
+                allowOff
+                onPick={(id) => pickTrack("sub", id)}
+                extra={
+                  info && (
+                    <DropdownMenuItem onSelect={() => setSearchingSubs(true)}>
+                      <Search /> Search online…
+                    </DropdownMenuItem>
+                  )
+                }
+              />
+              <SyncMenu speed={speed} audioDelay={audioDelay} subDelay={subDelay} subScale={subScale} />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" title="Quality" className="text-white hover:bg-white/10">
+                    <Gauge />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" side="top">
+                  <DropdownMenuLabel>Quality</DropdownMenuLabel>
+                  {QUALITIES.map((q) => (
+                    <DropdownMenuCheckItem key={q.label} checked={q.label === quality.label} onSelect={() => changeQuality(q)}>
+                      {q.label}
+                    </DropdownMenuCheckItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <IconButton
+                title={pinned ? "Stop keeping on top (T)" : "Keep on top of other windows (T)"}
+                onClick={togglePinned}
+                className={cn(pinned && "text-primary")}
+              >
+                {pinned ? <PinOff /> : <Pin />}
+              </IconButton>
+              </>
             )}
-            {chapters.length > 1 && <ChapterMenu chapters={chapters} time={time} previews={previews} onSeek={seekTo} />}
-            <TrackMenu icon={<AudioLines />} title="Audio" tracks={audio} onPick={(id) => pickTrack("audio", id)} />
-            <TrackMenu
-              icon={<Captions />}
-              title="Subtitles"
-              tracks={subs}
-              allowOff
-              onPick={(id) => pickTrack("sub", id)}
-              extra={
-                info && (
-                  <DropdownMenuItem onSelect={() => setSearchingSubs(true)}>
-                    <Search /> Search online…
-                  </DropdownMenuItem>
-                )
-              }
-            />
-            <SyncMenu speed={speed} audioDelay={audioDelay} subDelay={subDelay} subScale={subScale} />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" title="Quality" className="text-white hover:bg-white/10">
-                  <Gauge />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="top">
-                <DropdownMenuLabel>Quality</DropdownMenuLabel>
-                {QUALITIES.map((q) => (
-                  <DropdownMenuCheckItem key={q.label} checked={q.label === quality.label} onSelect={() => changeQuality(q)}>
-                    {q.label}
-                  </DropdownMenuCheckItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <IconButton
+              title={mini ? "Back to the full window (P)" : "Mini player (P)"}
+              onClick={toggleMini}
+              className={cn(mini && "text-primary")}
+            >
+              <PictureInPicture2 />
+            </IconButton>
             <IconButton title="Fullscreen (F)" onClick={toggleFullscreen}>
               {fullscreen ? <Minimize /> : <Maximize />}
             </IconButton>
@@ -857,12 +999,14 @@ function IconButton({
   onClick,
   big,
   disabled,
+  className,
 }: {
   children: React.ReactNode;
   title: string;
   onClick: () => void;
   big?: boolean;
   disabled?: boolean;
+  className?: string;
 }) {
   return (
     <Button
@@ -871,7 +1015,7 @@ function IconButton({
       title={title}
       onClick={onClick}
       disabled={disabled}
-      className={cn("text-white hover:bg-white/10", big && "size-11 [&_svg:not([class*='size-'])]:size-6")}
+      className={cn("text-white hover:bg-white/10", big && "size-11 [&_svg:not([class*='size-'])]:size-6", className)}
     >
       {children}
     </Button>
