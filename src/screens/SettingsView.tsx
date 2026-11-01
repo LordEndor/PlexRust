@@ -22,6 +22,7 @@ import {
   arrangeHubs,
   LANGUAGES,
   POSTER_SIZES,
+  SUBTITLE_SIZES,
   savePrefs,
   usePrefs,
   type Prefs,
@@ -99,6 +100,23 @@ export function SettingsView() {
                   value={prefs.subtitleLanguage}
                   options={[{ value: "", label: "File default" }, { value: "off", label: "Off" }, ...LANGUAGES]}
                   onChange={(v) => savePrefs({ subtitleLanguage: v })}
+                />
+              </Row>
+              <Row label="Subtitle size" hint="For plain subtitles. You can also change it while watching.">
+                <Picker
+                  value={prefs.subtitleSize}
+                  options={SUBTITLE_SIZES.map((s) => ({ value: s.key, label: s.label }))}
+                  onChange={(v) => savePrefs({ subtitleSize: v })}
+                />
+              </Row>
+              <Row label="Subtitle background" hint="A dark box behind the text, easier to read on bright scenes.">
+                <Picker
+                  value={prefs.subtitleBackground ? "on" : "off"}
+                  options={[
+                    { value: "off", label: "Off" },
+                    { value: "on", label: "On" },
+                  ]}
+                  onChange={(v) => savePrefs({ subtitleBackground: v === "on" })}
                 />
               </Row>
             </Section>

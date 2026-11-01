@@ -88,6 +88,8 @@ pub fn run() {
             player::report_progress,
             player::load_previews,
             player::remember_tracks,
+            player::subtitle_search,
+            player::subtitle_download,
             requests::seerr_config,
             requests::seerr_connect,
             requests::seerr_disconnect,

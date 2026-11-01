@@ -42,7 +42,7 @@ import {
 import { errorMessage, imageUrl } from "@/lib/api";
 import { notifyLibraryChanged } from "@/lib/changes";
 import { useNav } from "@/lib/nav";
-import { loadPrefs, usePrefs, type Prefs } from "@/lib/prefs";
+import { loadPrefs, SUBTITLE_SIZES, usePrefs, type Prefs } from "@/lib/prefs";
 import { formatTime, playback, QUALITIES, type PlaybackState } from "@/lib/player";
 import { skipSegments, useSkips } from "@/lib/skips";
 import { cn } from "@/lib/utils";
@@ -133,6 +133,14 @@ interface Props {
 export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Props) {
   const { server } = useNav();
   const prefs = usePrefs();
+  // Subtitle size and background from Settings, read by the cue style.
+  useEffect(() => {
+    if (!prefs) return;
+    const root = document.documentElement.style;
+    const scale = SUBTITLE_SIZES.find((s) => s.key === prefs.subtitleSize)?.scale ?? 1;
+    root.setProperty("--plexrust-sub-scale", String(scale));
+    root.setProperty("--plexrust-sub-bg", prefs.subtitleBackground ? "rgba(0, 0, 0, 0.65)" : "transparent");
+  }, [prefs]);
   const [info, setInfo] = useState<WebPlaybackInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);

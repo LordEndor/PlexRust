@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use plex::{Chapter, Marker, Metadata, PreviewIndex, TranscodeOptions};
+use plex::{Chapter, Marker, Metadata, Part, PreviewIndex, ServerConnection, SubtitleResult, TranscodeOptions};
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -197,22 +197,7 @@ pub async fn playback_info(
         .ok_or("This item has no playable file")?;
     let key = part.key.as_deref().ok_or("This item has no playable file")?;
 
-    let external_subtitles = part
-        .stream
-        .iter()
-        .filter(|s| s.stream_type == Some(3))
-        .filter_map(|s| {
-            Some(Subtitle {
-                url: state.plex.direct_url(&server, s.key.as_deref()?),
-                title: s
-                    .display_title
-                    .clone()
-                    .or_else(|| s.title.clone())
-                    .unwrap_or_else(|| "External".into()),
-                language: s.language_code.clone(),
-            })
-        })
-        .collect();
+    let external_subtitles = external_subtitles(&state, &server, part);
 
     let strip_dolby_vision = part
         .stream
@@ -299,4 +284,64 @@ pub async fn report_progress(
         state.plex.scrobble(&server, &rating_key).await.map_err(err)?;
     }
     Ok(())
+}
+
+/// Subtitle files stored next to the video (or downloaded into Plex), as
+/// URLs mpv can load.
+fn external_subtitles(state: &AppState, server: &ServerConnection, part: &Part) -> Vec<Subtitle> {
+    part.stream
+        .iter()
+        .filter(|s| s.stream_type == Some(3))
+        .filter_map(|s| {
+            Some(Subtitle {
+                url: state.plex.direct_url(server, s.key.as_deref()?),
+                title: s
+                    .display_title
+                    .clone()
+                    .or_else(|| s.title.clone())
+                    .unwrap_or_else(|| "External".into()),
+                language: s.language_code.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Searches the server's subtitle agents (OpenSubtitles by default) for an item.
+#[tauri::command]
+pub async fn subtitle_search(
+    state: State<'_, AppState>,
+    rating_key: String,
+    language: String,
+    hearing_impaired: bool,
+) -> CmdResult<Vec<SubtitleResult>> {
+    let server = current_server(&state).await?;
+    state
+        .plex
+        .search_subtitles(&server, &rating_key, &language, hearing_impaired)
+        .await
+        .map_err(err)
+}
+
+/// Downloads a search result into Plex and waits for it to show up on the
+/// item, then returns every external subtitle the item now has.
+#[tauri::command]
+pub async fn subtitle_download(state: State<'_, AppState>, rating_key: String, key: String) -> CmdResult<Vec<Subtitle>> {
+    let server = current_server(&state).await?;
+    let current = |item: Option<Metadata>| {
+        item.and_then(|i| i.media.into_iter().next())
+            .and_then(|m| m.part.into_iter().next())
+            .map(|p| external_subtitles(&state, &server, &p))
+            .unwrap_or_default()
+    };
+    let before = current(state.plex.metadata(&server, &rating_key).await.map_err(err)?).len();
+    state.plex.download_subtitle(&server, &rating_key, &key).await.map_err(err)?;
+    // Plex fetches the file in the background, usually within a few seconds.
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+        let subs = current(state.plex.metadata(&server, &rating_key).await.map_err(err)?);
+        if subs.len() > before {
+            return Ok(subs);
+        }
+    }
+    Err("Plex accepted the subtitle but it didn't appear on the item. Try again in a moment.".into())
 }

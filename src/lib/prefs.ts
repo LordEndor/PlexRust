@@ -17,6 +17,10 @@ export interface Prefs {
   audioLanguage: string;
   /** As above, or "off" to start with subtitles off. */
   subtitleLanguage: string;
+  /** A key from SUBTITLE_SIZES. */
+  subtitleSize: string;
+  /** A dark box behind subtitles, easier to read on bright scenes. */
+  subtitleBackground: boolean;
   /** A key from ACCENTS. */
   accent: string;
   /** A key from POSTER_SIZES. */
@@ -43,6 +47,8 @@ export const DEFAULT_PREFS: Prefs = {
   quality: "Original",
   audioLanguage: "",
   subtitleLanguage: "",
+  subtitleSize: "normal",
+  subtitleBackground: false,
   accent: "amber",
   posterSize: "medium",
   showFeatured: true,
@@ -97,6 +103,14 @@ export const LANGUAGES = [
   { label: "Spanish", value: "es,spa" },
   { label: "Italian", value: "it,ita" },
   { label: "Japanese", value: "ja,jpn" },
+];
+
+/** Subtitle text sizes, as mpv's sub-scale. */
+export const SUBTITLE_SIZES = [
+  { key: "small", label: "Small", scale: 0.8 },
+  { key: "normal", label: "Normal", scale: 1 },
+  { key: "large", label: "Large", scale: 1.25 },
+  { key: "huge", label: "Huge", scale: 1.6 },
 ];
 
 /** Accent colors for buttons, progress bars and highlights. All light enough for dark text on top. */

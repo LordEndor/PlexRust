@@ -9,6 +9,7 @@ mod playback;
 mod previews;
 mod resources;
 mod server;
+mod subtitles;
 
 pub use auth::{Pin, User};
 pub use client::{ClientInfo, PlexClient};
@@ -18,3 +19,4 @@ pub use playback::TranscodeOptions;
 pub use previews::PreviewIndex;
 pub use resources::{Connection, Resource};
 pub use server::{LibrarySection, ServerConnection};
+pub use subtitles::SubtitleResult;

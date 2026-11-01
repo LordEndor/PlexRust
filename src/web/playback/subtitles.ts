@@ -10,10 +10,10 @@ function ensureCueStyle() {
   style.id = STYLE_ID;
   style.textContent = `video::cue {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: clamp(1.1rem, 2.4vw, 1.6rem);
+  font-size: calc(clamp(1.1rem, 2.4vw, 1.6rem) * var(--plexrust-sub-scale, 1));
   line-height: 1.3;
   color: #fff;
-  background-color: rgba(0, 0, 0, 0.55);
+  background-color: var(--plexrust-sub-bg, rgba(0, 0, 0, 0.55));
   text-shadow: 0 0 3px #000, 0 1px 2px #000;
 }`;
   document.head.appendChild(style);

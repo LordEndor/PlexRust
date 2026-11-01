@@ -21,10 +21,14 @@ import {
   Loader2,
   Maximize,
   Minimize,
+  Minus,
   Pause,
   Play,
+  Plus,
   RotateCcw,
   RotateCw,
+  Search,
+  SlidersHorizontal,
   SkipBack,
   SkipForward,
   Volume2,
@@ -36,6 +40,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -43,16 +48,18 @@ import {
 import { errorMessage, imageUrl } from "@/lib/api";
 import { notifyLibraryChanged } from "@/lib/changes";
 import { SkipButton } from "@/components/SkipButton";
+import { SubtitleSearch } from "@/components/SubtitleSearch";
 import { WindowControls } from "@/components/TitleBar";
 import { skipSegments, useSkips } from "@/lib/skips";
 import { useNav } from "@/lib/nav";
-import { loadPrefs, usePrefs } from "@/lib/prefs";
+import { loadPrefs, SUBTITLE_SIZES, usePrefs } from "@/lib/prefs";
 import {
   formatTime,
   playback,
   previewUrl,
   QUALITIES,
   type Episode,
+  type ExternalSubtitle,
   type PlaybackInfo,
   type PlaybackState,
   type Quality,
@@ -70,7 +77,21 @@ const OBSERVED = [
   "volume",
   "mute",
   "eof-reached",
+  "speed",
+  "audio-delay",
+  "sub-delay",
+  "sub-scale",
 ] as const;
+
+const SPEEDS = [0.5, 0.75, 1, 1.1, 1.25, 1.5, 1.75, 2];
+/** Seconds one press of the sync buttons or keys moves audio or subtitles. */
+const DELAY_STEP = 0.1;
+const SUB_SCALE_STEP = 0.1;
+
+function formatDelay(secs: number) {
+  const ms = Math.round(secs * 1000);
+  return ms === 0 ? "In sync" : `${ms > 0 ? "+" : ""}${ms} ms`;
+}
 
 const MPV_ARGS = [
   "--vo=gpu-next",
@@ -169,10 +190,17 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const [previews, setPreviews] = useState<Previews | null>(null);
   // Chapters mpv found in the file, used when Plex has none.
   const [fileChapters, setFileChapters] = useState<Chapter[]>([]);
+  const [speed, setSpeed] = useState(1);
+  const [audioDelay, setAudioDelay] = useState(0);
+  const [subDelay, setSubDelay] = useState(0);
+  const [subScale, setSubScale] = useState(1);
+  const [searchingSubs, setSearchingSubs] = useState(false);
+  // External subtitles already handed to mpv for the file loaded now.
+  const addedSubs = useRef(new Set<string>());
 
   // Latest values for timers and cleanup, which outlive any one render.
-  const live = useRef({ time: 0, duration: 0, paused: false, info: null as PlaybackInfo | null });
-  live.current = { time, duration: duration || (info?.durationMs ?? 0) / 1000, paused, info };
+  const live = useRef({ time: 0, duration: 0, paused: false, info: null as PlaybackInfo | null, speed: 1 });
+  live.current = { time, duration: duration || (info?.durationMs ?? 0) / 1000, paused, info, speed };
   const session = useRef(crypto.randomUUID());
   const transcoding = useRef(false);
   const hideTimer = useRef<number | undefined>(undefined);
@@ -250,6 +278,11 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         if (prefs.audioLanguage) args.push(`--alang=${prefs.audioLanguage}`);
         if (prefs.subtitleLanguage === "off") args.push("--sid=no");
         else if (prefs.subtitleLanguage) args.push(`--slang=${prefs.subtitleLanguage}`);
+        const size = SUBTITLE_SIZES.find((s) => s.key === prefs.subtitleSize);
+        if (size && size.scale !== 1) args.push(`--sub-scale=${size.scale}`);
+        if (prefs.subtitleBackground) {
+          args.push("--sub-border-style=background-box", "--sub-back-color=0.0/0.0/0.0/0.65");
+        }
         // Put back the audio and subtitles last picked for this show. External
         // subtitles are added after the file opens, so a subtitle pick keeps
         // being looked for as tracks appear.
@@ -314,6 +347,18 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
               case "mute":
                 setMuted(!!data);
                 break;
+              case "speed":
+                if (typeof data === "number") setSpeed(data);
+                break;
+              case "audio-delay":
+                if (typeof data === "number") setAudioDelay(data);
+                break;
+              case "sub-delay":
+                if (typeof data === "number") setSubDelay(data);
+                break;
+              case "sub-scale":
+                if (typeof data === "number") setSubScale(data);
+                break;
               case "eof-reached":
                 if (data) {
                   if (pi.next && prefs.skipCredits !== "off") finishRef.current();
@@ -356,7 +401,10 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
 
         unlisten.push(
           await listenEvents((ev) => {
-            if (ev.event === "start-file") applied.current = { audio: false, sub: false };
+            if (ev.event === "start-file") {
+              applied.current = { audio: false, sub: false };
+              addedSubs.current.clear();
+            }
             if (ev.event === "end-file" && ev.reason === "error") {
               const detail = (ev as { file_error?: unknown }).file_error;
               fail(typeof detail === "string" ? detail : "unknown error");
@@ -370,6 +418,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
             if (ev.event === "file-loaded") {
               if (!transcoding.current) {
                 for (const s of pi.externalSubtitles) {
+                  addedSubs.current.add(s.url);
                   command("sub-add", [s.url, "auto", s.title, s.language ?? ""]).catch(() => {});
                 }
               }
@@ -486,7 +535,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     const onKey = async (e: KeyboardEvent) => {
       poke();
       // Keys inside an open menu navigate or close the menu, not the player.
-      if (document.querySelector('[role="menu"]')) return;
+      if (document.querySelector('[role="menu"], [role="dialog"]')) return;
       if (e.shiftKey && (e.key === "N" || e.key === "P")) {
         const to = e.key === "N" ? live.current.info?.next : live.current.info?.previous;
         if (to) onPlayNext(to.ratingKey);
@@ -520,6 +569,24 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
           break;
         case "f":
           toggleFullscreen();
+          break;
+        case "[":
+        case "]": {
+          const i = SPEEDS.findIndex((s) => s >= live.current.speed - 0.001);
+          const next = SPEEDS[Math.min(SPEEDS.length - 1, Math.max(0, (i < 0 ? SPEEDS.length : i) + (e.key === "]" ? 1 : -1)))];
+          setProperty<number>("speed", next).catch(() => {});
+          break;
+        }
+        case "Backspace":
+          setProperty<number>("speed", 1).catch(() => {});
+          break;
+        case "z":
+        case "x":
+          command("add", ["sub-delay", e.key === "x" ? DELAY_STEP : -DELAY_STEP]).catch(() => {});
+          break;
+        case "Z":
+        case "X":
+          command("add", ["audio-delay", e.key === "X" ? DELAY_STEP : -DELAY_STEP]).catch(() => {});
           break;
         case "Escape":
           if (await getCurrentWindow().isFullscreen()) toggleFullscreen();
@@ -639,6 +706,23 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         </div>
       )}
 
+      {searchingSubs && info && (
+        <SubtitleSearch
+          ratingKey={info.ratingKey}
+          title={info.subtitle ? `${info.title} · ${info.subtitle}` : info.title}
+          onClose={() => setSearchingSubs(false)}
+          onDownloaded={(all: ExternalSubtitle[]) => {
+            // Load the new file and switch to it.
+            for (const s of all) {
+              if (addedSubs.current.has(s.url)) continue;
+              addedSubs.current.add(s.url);
+              command("sub-add", [s.url, "select", s.title, s.language ?? ""]).catch(() => {});
+            }
+            setSearchingSubs(false);
+          }}
+        />
+      )}
+
       {error && (
         <div className="absolute inset-0 grid place-items-center bg-black/80">
           <div className="flex max-w-md flex-col items-center gap-4 text-center">
@@ -726,7 +810,21 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
             )}
             {chapters.length > 1 && <ChapterMenu chapters={chapters} time={time} previews={previews} onSeek={seekTo} />}
             <TrackMenu icon={<AudioLines />} title="Audio" tracks={audio} onPick={(id) => pickTrack("audio", id)} />
-            <TrackMenu icon={<Captions />} title="Subtitles" tracks={subs} allowOff onPick={(id) => pickTrack("sub", id)} />
+            <TrackMenu
+              icon={<Captions />}
+              title="Subtitles"
+              tracks={subs}
+              allowOff
+              onPick={(id) => pickTrack("sub", id)}
+              extra={
+                info && (
+                  <DropdownMenuItem onSelect={() => setSearchingSubs(true)}>
+                    <Search /> Search online…
+                  </DropdownMenuItem>
+                )
+              }
+            />
+            <SyncMenu speed={speed} audioDelay={audioDelay} subDelay={subDelay} subScale={subScale} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" title="Quality" className="text-white hover:bg-white/10">
@@ -786,12 +884,15 @@ function TrackMenu({
   tracks,
   allowOff,
   onPick,
+  extra,
 }: {
   icon: React.ReactNode;
   title: string;
   tracks: Track[];
   allowOff?: boolean;
   onPick: (id: number | undefined) => Promise<void>;
+  /** More actions under the tracks, such as searching for subtitles. */
+  extra?: React.ReactNode;
 }) {
   const none = !tracks.some((t) => t.selected);
   return (
@@ -801,7 +902,7 @@ function TrackMenu({
           variant="ghost"
           size="icon"
           title={title}
-          disabled={tracks.length === 0}
+          disabled={tracks.length === 0 && !extra}
           className="text-white hover:bg-white/10"
         >
           {icon}
@@ -822,8 +923,117 @@ function TrackMenu({
             <span className="truncate">{trackLabel(t)}</span>
           </DropdownMenuCheckItem>
         ))}
+        {extra && (
+          <>
+            <DropdownMenuSeparator />
+            {extra}
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Playback speed, audio and subtitle sync, and subtitle size, for this file only. */
+function SyncMenu({
+  speed,
+  audioDelay,
+  subDelay,
+  subScale,
+}: {
+  speed: number;
+  audioDelay: number;
+  subDelay: number;
+  subScale: number;
+}) {
+  const changed = speed !== 1 || audioDelay !== 0 || subDelay !== 0;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          title="Speed and sync"
+          className={cn("relative text-white hover:bg-white/10", changed && "text-primary")}
+        >
+          <SlidersHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side="top" className="w-72">
+        <DropdownMenuLabel>Speed ([ and ])</DropdownMenuLabel>
+        <div className="flex flex-wrap gap-1 px-2 pb-2">
+          {SPEEDS.map((s) => (
+            <button
+              key={s}
+              className={cn(
+                "hover:bg-accent rounded-md px-2 py-1 text-xs tabular-nums",
+                Math.abs(s - speed) < 0.001 && "bg-primary text-primary-foreground hover:bg-primary",
+              )}
+              onClick={() => setProperty<number>("speed", s).catch(() => {})}
+            >
+              {s}×
+            </button>
+          ))}
+        </div>
+        <DropdownMenuSeparator />
+        <Stepper
+          label="Audio sync"
+          keys="Shift+Z / Shift+X"
+          value={formatDelay(audioDelay)}
+          onStep={(d) => command("add", ["audio-delay", d * DELAY_STEP]).catch(() => {})}
+          onReset={audioDelay !== 0 ? () => setProperty<number>("audio-delay", 0).catch(() => {}) : undefined}
+        />
+        <Stepper
+          label="Subtitle sync"
+          keys="Z / X"
+          value={formatDelay(subDelay)}
+          onStep={(d) => command("add", ["sub-delay", d * DELAY_STEP]).catch(() => {})}
+          onReset={subDelay !== 0 ? () => setProperty<number>("sub-delay", 0).catch(() => {}) : undefined}
+        />
+        <Stepper
+          label="Subtitle size"
+          value={`${Math.round(subScale * 100)}%`}
+          onStep={(d) => setProperty<number>("sub-scale", Math.max(0.4, Math.min(3, subScale + d * SUB_SCALE_STEP))).catch(() => {})}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function Stepper({
+  label,
+  keys,
+  value,
+  onStep,
+  onReset,
+}: {
+  label: string;
+  keys?: string;
+  value: string;
+  onStep: (direction: 1 | -1) => void;
+  onReset?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1.5">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm">{label}</div>
+        <div className="text-muted-foreground text-xs">
+          {value}
+          {onReset && (
+            <button className="text-primary ml-2 hover:underline" onClick={onReset}>
+              Reset
+            </button>
+          )}
+        </div>
+        {keys && <div className="text-muted-foreground/70 text-[11px]">{keys}</div>}
+      </div>
+      <Button variant="outline" size="icon" className="size-7" aria-label={`${label} down`} onClick={() => onStep(-1)}>
+        <Minus />
+      </Button>
+      <Button variant="outline" size="icon" className="size-7" aria-label={`${label} up`} onClick={() => onStep(1)}>
+        <Plus />
+      </Button>
+    </div>
   );
 }
 
