@@ -506,6 +506,30 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     };
   }, []);
 
+  // Discord status: what's playing and the time left, refreshed on pause,
+  // seeks and every half minute. Cleared when playback ends.
+  const discordOn = !!prefs?.discordStatus && !!prefs.discordAppId;
+  const discordTick = Math.floor(time / 30);
+  useEffect(() => {
+    if (!discordOn || !info || !prefs) return;
+    // Episodes read "Show" over "S1 · E2 · Title"; movies "Title" over the year.
+    const [show, ...episode] = info.subtitle?.includes(" · ") ? info.subtitle.split(" · ") : [];
+    const line = show ? `${episode.join(" · ")} · ${info.title}` : (info.subtitle ?? "");
+    invoke("discord_presence", {
+      appId: prefs.discordAppId,
+      details: show ?? info.title,
+      state: paused ? `Paused · ${line}` : line,
+      positionMs: paused ? null : Math.round(live.current.time * 1000),
+      durationMs: paused ? null : Math.round(live.current.duration * 1000),
+    }).catch(() => {});
+  }, [discordOn, info, paused, discordTick, prefs]);
+  useEffect(() => {
+    if (!discordOn) return;
+    return () => {
+      invoke("discord_clear").catch(() => {});
+    };
+  }, [discordOn]);
+
   // Keep Plex's Continue Watching in step while playing.
   useEffect(() => {
     if (paused) {

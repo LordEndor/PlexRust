@@ -11,6 +11,7 @@
     "updater:default",
     "process:allow-restart",
     "mpv:default",
+    "notification:default",
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
     "core:window:allow-start-dragging",

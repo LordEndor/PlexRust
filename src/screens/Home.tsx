@@ -32,6 +32,7 @@ import { useCalendarEnabled } from "@/lib/calendar";
 import { DownloadsContext, isActive, useDownloads, useDownloadsEnabled } from "@/lib/downloads";
 import { OFFLINE_SUPPORTED, useOffline } from "@/lib/offline";
 import { usePrefs } from "@/lib/prefs";
+import { NewArrivals } from "@/components/NewArrivals";
 import { ReadyToasts } from "@/components/ReadyToasts";
 import { useSeerrEnabled } from "@/lib/seerr";
 import { cn } from "@/lib/utils";
@@ -343,6 +344,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
           )}
         </div>
       </div>
+      <NewArrivals serverId={server.machineId} />
       <ReadyToasts snapshot={downloads.snapshot} enabled={prefs?.readyToasts ?? true} hidden={top.name === "player"} />
       </DownloadsContext.Provider>
     </NavContext.Provider>
