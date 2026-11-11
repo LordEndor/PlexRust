@@ -246,6 +246,12 @@ impl SeerrClient {
         self.get(&format!("/{}/{tmdb_id}", media_type.as_str()), &[]).await
     }
 
+    /// One season of a show with all its episodes, aired or not, as TMDB
+    /// lists them.
+    pub async fn season(&self, tmdb_id: u64, season_number: u32) -> Result<Value> {
+        self.get(&format!("/tv/{tmdb_id}/season/{season_number}"), &[]).await
+    }
+
     /// How many requests the user has left, per media type.
     pub async fn quota(&self, user_id: u64) -> Result<Value> {
         self.get(&format!("/user/{user_id}/quota"), &[]).await

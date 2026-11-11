@@ -164,6 +164,51 @@ export function SettingsView() {
               </Row>
               <HomeRows prefs={prefs} />
             </Section>
+
+            <Section
+              title="Shows"
+              description="Missing episodes and seasons are looked up through your Seerr server (set it up under Requests below). Click one to open it in Requests."
+            >
+              <Row
+                label="Missing episodes"
+                hint="Episodes the server doesn't have are listed greyed out among the others, with the air date for ones still to come."
+              >
+                <Segmented
+                  value={prefs.missingEpisodes ? "on" : "off"}
+                  options={[
+                    { value: "on", label: "On" },
+                    { value: "off", label: "Off" },
+                  ]}
+                  onChange={(v) => savePrefs({ missingEpisodes: v === "on" })}
+                />
+              </Row>
+              <Row
+                label="Missing seasons"
+                hint="Seasons the server doesn't have are shown greyed out on the show's page, with the air date for ones still to come."
+              >
+                <Segmented
+                  value={prefs.missingSeasons ? "on" : "off"}
+                  options={[
+                    { value: "on", label: "On" },
+                    { value: "off", label: "Off" },
+                  ]}
+                  onChange={(v) => savePrefs({ missingSeasons: v === "on" })}
+                />
+              </Row>
+              <Row
+                label="Skip the season list for single-season shows"
+                hint="A show with only one season lists its episodes straight away on the show's page."
+              >
+                <Segmented
+                  value={prefs.skipSingleSeason ? "on" : "off"}
+                  options={[
+                    { value: "on", label: "On" },
+                    { value: "off", label: "Off" },
+                  ]}
+                  onChange={(v) => savePrefs({ skipSingleSeason: v === "on" })}
+                />
+              </Row>
+            </Section>
           </>
         )}
 
