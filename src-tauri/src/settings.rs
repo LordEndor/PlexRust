@@ -109,6 +109,12 @@ pub struct Prefs {
     pub discord_status: bool,
     /// The Discord application id the status is shown under.
     pub discord_app_id: String,
+    /// Episodes the server doesn't have, greyed out in a season's list.
+    pub missing_episodes: bool,
+    /// Seasons the server doesn't have, greyed out on a show's page.
+    pub missing_seasons: bool,
+    /// A show with only one season lists its episodes on the show's page.
+    pub skip_single_season: bool,
 }
 
 /// A Home row listing one library in a picked order, optionally narrowed down.
@@ -147,6 +153,9 @@ impl Default for Prefs {
             new_arrival_alerts: true,
             discord_status: false,
             discord_app_id: String::new(),
+            missing_episodes: true,
+            missing_seasons: true,
+            skip_single_season: true,
         }
     }
 }

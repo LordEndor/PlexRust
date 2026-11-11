@@ -74,6 +74,24 @@ export interface SeerrSeason {
   name: string;
   episodeCount: number;
   airDate?: string | null;
+  posterPath?: string | null;
+  overview?: string | null;
+}
+
+export interface SeerrEpisode {
+  episodeNumber: number;
+  seasonNumber: number;
+  name: string;
+  airDate?: string | null;
+  overview?: string | null;
+  stillPath?: string | null;
+}
+
+/** One season with its episodes, from `/tv/{id}/season/{n}`. */
+export interface SeerrSeasonDetails {
+  seasonNumber: number;
+  name?: string;
+  episodes?: SeerrEpisode[];
 }
 
 export interface SeerrDetails extends SeerrResult {
@@ -151,6 +169,8 @@ export const seerr = {
     invoke<SeerrPage>("seerr_browse", { mediaType, page, browse }),
   genres: (mediaType: MediaType) => invoke<Genre[]>("seerr_genres", { mediaType }),
   details: (mediaType: MediaType, tmdbId: number) => invoke<SeerrDetails>("seerr_details", { mediaType, tmdbId }),
+  season: (tmdbId: number, seasonNumber: number) =>
+    invoke<SeerrSeasonDetails>("seerr_season", { tmdbId, seasonNumber }),
   quota: () => invoke<Quota>("seerr_quota"),
   request: (mediaType: MediaType, tmdbId: number, seasons: number[] = [], is4k = false) =>
     invoke<SeerrRequest>("seerr_request", { request: { mediaType, tmdbId, seasons, is4k } }),
@@ -196,7 +216,7 @@ export function useRequestsChanged(onChange: () => void) {
 }
 
 /** TMDB artwork. Widths TMDB serves: posters w92–w780, backdrops w300–w1280. */
-export function tmdbImage(path: string | null | undefined, width: "w185" | "w342" | "w500" | "w780" | "w1280") {
+export function tmdbImage(path: string | null | undefined, width: "w300" | "w185" | "w342" | "w500" | "w780" | "w1280") {
   return path ? `https://image.tmdb.org/t/p/${width}${path}` : undefined;
 }
 

@@ -167,6 +167,19 @@ pub async fn seerr_details(
     c.client.details(media_type, tmdb_id).await.map_err(err)
 }
 
+/// A season's episodes as TMDB lists them, used to show the ones missing
+/// from the Plex server.
+#[tauri::command]
+pub async fn seerr_season(
+    state: State<'_, AppState>,
+    seerr: State<'_, SeerrState>,
+    tmdb_id: u64,
+    season_number: u32,
+) -> CmdResult<Value> {
+    let c = connection(&state, &seerr).await?;
+    c.client.season(tmdb_id, season_number).await.map_err(err)
+}
+
 #[tauri::command]
 pub async fn seerr_quota(state: State<'_, AppState>, seerr: State<'_, SeerrState>) -> CmdResult<Value> {
     let c = connection(&state, &seerr).await?;

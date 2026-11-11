@@ -21,10 +21,12 @@ import { errorMessage, imageUrl, library, type Hub, type Metadata, type Tag } fr
 import { useLibraryChanged } from "@/lib/changes";
 import { episodeLabel, formatDuration, isWatched, progress, resolutionLabel } from "@/lib/format";
 import { useNav } from "@/lib/nav";
+import { isUpcoming, releaseLabel, useMissing } from "@/lib/missing";
 import { formatTime } from "@/lib/player";
 import { posterSize, usePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import type { ManageDialog } from "@/lib/manage";
+import { tmdbImage, type SeerrEpisode, type SeerrSeason } from "@/lib/seerr";
 import { canWatchlist, watchlist } from "@/lib/watchlist";
 import { PlaylistView } from "@/screens/PlaylistView";
 
@@ -84,6 +86,30 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
     setRelated([]);
   }, [ratingKey]);
 
+  const prefs = usePrefs();
+  // A show with one season lists that season's episodes on its own page.
+  const onlySeason =
+    item?.type === "show" && prefs?.skipSingleSeason && children?.length === 1 ? children[0] : null;
+  const [seasonEpisodes, setSeasonEpisodes] = useState<Metadata[] | null>(null);
+  useEffect(() => {
+    setSeasonEpisodes(null);
+    if (!onlySeason) return;
+    let live = true;
+    library
+      .children(onlySeason.ratingKey)
+      .then((e) => live && setSeasonEpisodes(e))
+      .catch((e) => live && setError(errorMessage(e)));
+    return () => {
+      live = false;
+    };
+  }, [onlySeason]);
+
+  const missing = useMissing(item, children, {
+    seasons: !!prefs?.missingSeasons,
+    episodes: !!prefs?.missingEpisodes,
+    season: onlySeason?.index != null ? { index: onlySeason.index, episodes: seasonEpisodes } : null,
+  });
+
   const trailer = extras.find((x) => x.extraType === 1) ?? null;
 
   if (error) return <p className="text-destructive p-8 text-sm">{error}</p>;
@@ -94,8 +120,25 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
     <div className="h-full overflow-y-auto">
       <Hero item={item} trailer={trailer} upNext={upNext} />
       <div className="relative flex flex-col gap-10 px-8 pb-12">
-        {item.type === "show" && <Seasons seasons={children} />}
-        {item.type === "season" && <Episodes episodes={children} />}
+        {item.type === "show" &&
+          (onlySeason ? (
+            <>
+              <Episodes
+                title={onlySeason.title || "Episodes"}
+                episodes={seasonEpisodes}
+                missing={missing?.episodes}
+                tmdbId={missing?.tmdbId}
+              />
+              {!!missing?.seasons.length && (
+                <Seasons title="More seasons" seasons={[]} missing={missing.seasons} tmdbId={missing.tmdbId} />
+              )}
+            </>
+          ) : (
+            <Seasons seasons={children} missing={missing?.seasons} tmdbId={missing?.tmdbId} />
+          ))}
+        {item.type === "season" && (
+          <Episodes episodes={children} missing={missing?.episodes} tmdbId={missing?.tmdbId} />
+        )}
         {item.type === "collection" && <Seasons seasons={children} title="In this collection" />}
         {item.Role.length > 0 && <Cast item={item} />}
         {extras.length > 0 && <Extras extras={extras} />}
@@ -326,8 +369,29 @@ function Hero({ item, trailer, upNext }: { item: Metadata; trailer: Metadata | n
   );
 }
 
-function Seasons({ seasons, title = "Seasons" }: { seasons: Metadata[] | null; title?: string }) {
+function Seasons({
+  seasons,
+  title = "Seasons",
+  missing = [],
+  tmdbId,
+}: {
+  seasons: Metadata[] | null;
+  title?: string;
+  /** Seasons the server doesn't have, shown greyed out in order among the others. */
+  missing?: SeerrSeason[];
+  tmdbId?: number;
+}) {
   const prefs = usePrefs();
+  const cards =
+    seasons === null
+      ? []
+      : [
+          ...seasons.map((s) => ({ index: s.index ?? Infinity, el: <Poster key={s.ratingKey} item={s} /> })),
+          ...missing.map((s) => ({
+            index: s.seasonNumber,
+            el: <MissingSeason key={`missing-${s.seasonNumber}`} season={s} tmdbId={tmdbId} />,
+          })),
+        ].sort((a, b) => a.index - b.index);
   return (
     <section>
       <h2 className="mb-3 text-lg font-semibold">{title}</h2>
@@ -337,19 +401,128 @@ function Seasons({ seasons, title = "Seasons" }: { seasons: Metadata[] | null; t
       >
         {seasons === null
           ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="aspect-[2/3] rounded-xl" />)
-          : seasons.map((s) => <Poster key={s.ratingKey} item={s} />)}
+          : cards.map((c) => c.el)}
       </div>
     </section>
   );
 }
 
-function Episodes({ episodes }: { episodes: Metadata[] | null }) {
+/** Opens the show's page in Seerr, where what's missing can be requested. */
+function requestTarget(tmdbId: number | undefined) {
+  return tmdbId ? ({ name: "request", mediaType: "tv", tmdbId } as const) : null;
+}
+
+function MissingSeason({ season, tmdbId }: { season: SeerrSeason; tmdbId?: number }) {
+  const { navigate } = useNav();
+  const target = requestTarget(tmdbId);
+  const poster = tmdbImage(season.posterPath, "w342");
+  const upcoming = isUpcoming(season.airDate);
+  return (
+    <button
+      onClick={() => target && navigate(target)}
+      title={target ? "Not on your server. Open it in Requests." : "Not on your server"}
+      className="group flex w-full flex-col gap-2 text-left outline-none"
+    >
+      <div className="bg-card relative aspect-[2/3] w-full overflow-hidden rounded-xl border border-dashed transition-all group-hover:ring-2 group-hover:ring-muted-foreground/40">
+        {poster ? (
+          <img src={poster} alt="" loading="lazy" className="size-full object-cover opacity-35 grayscale" />
+        ) : (
+          <div className="text-muted-foreground grid size-full place-items-center p-3 text-center text-sm">
+            {season.name}
+          </div>
+        )}
+        <span className="absolute top-2 left-2 rounded-md bg-black/75 px-1.5 py-0.5 text-xs font-medium text-white/80">
+          {upcoming ? "Upcoming" : "Missing"}
+        </span>
+      </div>
+      <div className="min-w-0 px-0.5 opacity-60">
+        <div className="truncate text-sm font-medium">{season.name || `Season ${season.seasonNumber}`}</div>
+        <div className="text-muted-foreground truncate text-xs">
+          {upcoming || !season.episodeCount
+            ? releaseLabel(season.airDate)
+            : `${season.episodeCount} episode${season.episodeCount === 1 ? "" : "s"}`}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function MissingEpisode({ episode, tmdbId }: { episode: SeerrEpisode; tmdbId?: number }) {
+  const { navigate } = useNav();
+  const target = requestTarget(tmdbId);
+  const still = tmdbImage(episode.stillPath, "w300");
+  const upcoming = isUpcoming(episode.airDate);
+  return (
+    <button
+      onClick={() => target && navigate(target)}
+      title={target ? "Not on your server. Open it in Requests." : "Not on your server"}
+      className="hover:bg-card/60 flex gap-5 rounded-xl p-2 text-left transition-colors"
+    >
+      <div className="bg-card relative aspect-video w-56 shrink-0 overflow-hidden rounded-lg border border-dashed">
+        {still && <img src={still} alt="" loading="lazy" className="size-full object-cover opacity-35 grayscale" />}
+        <span className="absolute top-2 left-2 rounded-md bg-black/75 px-1.5 py-0.5 text-xs font-medium text-white/80">
+          {upcoming ? "Upcoming" : "Not on server"}
+        </span>
+      </div>
+      <div className="flex min-w-0 flex-col gap-1 py-1 opacity-60">
+        <div className="font-medium">
+          <span className="text-muted-foreground mr-2">{episode.episodeNumber}</span>
+          {episode.name || `Episode ${episode.episodeNumber}`}
+        </div>
+        <div className={cn("text-xs", upcoming ? "text-primary" : "text-muted-foreground")}>
+          {releaseLabel(episode.airDate)}
+        </div>
+        {episode.overview && <p className="text-muted-foreground line-clamp-2 text-sm">{episode.overview}</p>}
+      </div>
+    </button>
+  );
+}
+
+function Episodes({
+  episodes,
+  title = "Episodes",
+  missing = [],
+  tmdbId,
+}: {
+  episodes: Metadata[] | null;
+  title?: string;
+  /** Episodes the server doesn't have, shown greyed out in order among the others. */
+  missing?: SeerrEpisode[];
+  tmdbId?: number;
+}) {
   const { server, navigate } = useNav();
+  const rows =
+    episodes === null
+      ? []
+      : [
+          ...episodes.map((e) => ({ index: e.index ?? Infinity, e, m: null })),
+          ...missing.map((m) => ({ index: m.episodeNumber, e: null, m })),
+        ].sort((a, b) => a.index - b.index);
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="mb-1 text-lg font-semibold">Episodes</h2>
+      <h2 className="mb-1 text-lg font-semibold">{title}</h2>
       {episodes === null && Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
-      {episodes?.map((e) => (
+      {rows.map(({ e, m }) =>
+        m ? (
+          <MissingEpisode key={`missing-${m.episodeNumber}`} episode={m} tmdbId={tmdbId} />
+        ) : (
+          <EpisodeRow key={e!.ratingKey} e={e!} server={server} navigate={navigate} />
+        ),
+      )}
+    </section>
+  );
+}
+
+function EpisodeRow({
+  e,
+  server,
+  navigate,
+}: {
+  e: Metadata;
+  server: ReturnType<typeof useNav>["server"];
+  navigate: ReturnType<typeof useNav>["navigate"];
+}) {
+  return (
         <ItemContextMenu key={e.ratingKey} item={e}>
           <button
             onClick={() => navigate({ name: "item", ratingKey: e.ratingKey })}
@@ -383,8 +556,6 @@ function Episodes({ episodes }: { episodes: Metadata[] | null }) {
             </div>
           </button>
         </ItemContextMenu>
-      ))}
-    </section>
   );
 }
 

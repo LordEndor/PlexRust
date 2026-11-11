@@ -133,6 +133,7 @@ pub fn run() {
             requests::seerr_browse,
             requests::seerr_genres,
             requests::seerr_details,
+            requests::seerr_season,
             requests::seerr_quota,
             requests::seerr_request,
             requests::seerr_requests,

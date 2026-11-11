@@ -43,6 +43,12 @@ export interface Prefs {
   discordStatus: boolean;
   /** The Discord application id the status is shown under. */
   discordAppId: string;
+  /** Episodes the server doesn't have, greyed out in a season's list (found through Seerr). */
+  missingEpisodes: boolean;
+  /** Seasons the server doesn't have, greyed out on a show's page. */
+  missingSeasons: boolean;
+  /** A show with only one season lists its episodes on the show's page. */
+  skipSingleSeason: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -66,6 +72,9 @@ export const DEFAULT_PREFS: Prefs = {
   newArrivalAlerts: true,
   discordStatus: false,
   discordAppId: "",
+  missingEpisodes: true,
+  missingSeasons: true,
+  skipSingleSeason: true,
 };
 
 // One copy for the whole app, so the settings page and the player agree.

@@ -448,6 +448,11 @@ export const serviceCommands: Record<string, (args: Args) => Promise<unknown>> =
     return seerrSend(s, "GET", `/${mediaType as MediaType}/${tmdbId}`);
   },
 
+  async seerr_season({ tmdbId, seasonNumber }) {
+    const { s } = await seerrConnection();
+    return seerrSend(s, "GET", `/tv/${tmdbId}/season/${seasonNumber}`);
+  },
+
   async seerr_quota() {
     const { s, info } = await seerrConnection();
     return seerrSend(s, "GET", `/user/${info.user.id}/quota`);

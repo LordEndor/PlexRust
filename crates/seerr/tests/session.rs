@@ -55,6 +55,8 @@ async fn serve(fake: Arc<Fake>) -> String {
                     ("401 Unauthorized", String::new(), r#"{"message":"expired"}"#.to_owned())
                 } else if line.starts_with("GET /api/v1/search?query=The%20Office%20%28US%29&page=1 ") {
                     ("200 OK", String::new(), r#"{"results":[{"id":2316}]}"#.to_owned())
+                } else if line.starts_with("GET /api/v1/tv/2316/season/3 ") {
+                    ("200 OK", String::new(), r#"{"seasonNumber":3,"episodes":[{"episodeNumber":1,"name":"Gay Witch Hunt","airDate":"2006-09-21"}]}"#.to_owned())
                 } else {
                     ("404 Not Found", String::new(), format!(r#"{{"message":"{line}"}}"#))
                 };
@@ -97,4 +99,14 @@ async fn reports_seerr_error_messages() {
         }
         other => panic!("expected a 404, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn lists_a_seasons_episodes() {
+    let fake = Arc::new(Fake { sign_ins: AtomicUsize::new(0), reject: AtomicUsize::new(0) });
+    let addr = serve(fake).await;
+    let client = SeerrClient::new(&addr, Auth::Plex("plex-token".into())).unwrap();
+    let season = client.season(2316, 3).await.unwrap();
+    assert_eq!(season["episodes"][0]["episodeNumber"], 1);
+    assert_eq!(season["episodes"][0]["airDate"], "2006-09-21");
 }
