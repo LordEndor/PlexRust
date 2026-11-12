@@ -51,6 +51,7 @@ import {
   directPlayUrl,
   getPlaybackInfo,
   selectStreams,
+  streamRefusal,
   streamUrl,
   timelineUrl,
   transcodeSessionInfo,
@@ -104,6 +105,19 @@ const MODE_LABEL: Record<PlaybackMode, string> = {
 };
 
 const planKey = (p: PlaybackPlan) => `${p.mode}:${p.subtitles.kind}:${p.step ?? ""}`;
+
+/** A plan in a few words, for the list of what was tried. */
+function planLabel(p: PlaybackPlan) {
+  const size = p.mode === "transcode" ? ` ${p.maxHeight}p` : "";
+  const subs = p.subtitles.kind === "burn" ? ", subtitles burned in" : p.subtitles.kind === "sidecar" ? ", subtitles as text" : "";
+  return `${MODE_LABEL[p.mode]}${size}${subs}`;
+}
+
+interface Attempt {
+  id: number;
+  plan: string;
+  result: string;
+}
 
 /** What the viewer is told when the player steps down to a lighter plan. */
 const STEP_NOTICE: Record<LighterStep, string> = {
@@ -172,6 +186,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   /** What the stream is doing, and its last error, for the stats panel. */
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  /** Every plan that failed since the viewer last started playback, shown with the error. */
+  const [attempts, setAttempts] = useState<Attempt[]>([]);
+  const attemptId = useRef(0);
 
   const video = useRef<HTMLVideoElement>(null);
   const hls = useRef<Hls | null>(null);
@@ -282,12 +299,23 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     [lighter],
   );
 
+  /** Notes that `p` failed. Returns the entry's id, so Plex's reason can be added once it answers. */
+  const noteAttempt = useCallback((p: PlaybackPlan, result: string) => {
+    const id = ++attemptId.current;
+    setAttempts((list) => [...list, { id, plan: planLabel(p), result }]);
+    return id;
+  }, []);
+
   /** Moves to the next lighter plan, or returns false when none is left. */
   const stepDown = useCallback(
     (at: number) => {
       if (!source.current || !caps.current) return false;
       const next = lighter(live.current.quality).find((l) => !triedSteps.current.has(l.step!));
-      if (!next) return false;
+      if (!next) {
+        // Nothing worked: don't start the next episode on a step that failed.
+        forgetStep(source.current);
+        return false;
+      }
       step.current = next.step!;
       triedSteps.current.add(next.step!);
       rememberStep(source.current, next.step!);
@@ -324,8 +352,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       setStreamStatus(p.mode === "directPlay" ? "Loading the file" : "Asking Plex to start the stream");
 
       /** The plan can't play: try the next one down, or show the error. */
-      const fatal = (message: string) => {
+      const fatal = (message: string, refusedUrl?: string) => {
         if (token !== startId.current) return;
+        const attempt = noteAttempt(p, message);
+        // Plex answers a start it won't do with a bare HTTP 400: ask it why.
+        if (refusedUrl) {
+          streamRefusal(refusedUrl).then((why) => {
+            if (why) setAttempts((list) => list.map((a) => (a.id === attempt ? { ...a, result: `${a.result}. Plex says: ${why}` } : a)));
+          });
+        }
         failed.current.add(planKey(p));
         // A lighter plan that fails outright moves on down its own ladder.
         if (p.step) {
@@ -374,7 +409,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
               recovered = true;
               h.recoverMediaError();
             } else {
-              fatal(`Plex couldn't stream this${status}: ${data.details}`);
+              fatal(`Plex couldn't stream this${status}: ${data.details}`, playlist && data.response?.code ? url : undefined);
             }
           });
           h.on(Hls.Events.MANIFEST_LOADING, () => setStreamStatus("Asking Plex for the playlist"));
@@ -412,7 +447,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         );
       }
     },
-    [ratingKey, stopStream, flash, replan, stepDown],
+    [ratingKey, stopStream, flash, replan, stepDown, noteAttempt],
   );
   startRef.current = startStream;
 
@@ -517,6 +552,8 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         if (done || planRef.current !== plan) return;
         if ((info?.speed ?? 0) >= 1 && starved.current < STALL_SECS_HARD) return;
         starved.current = 0;
+        const speed = info?.speed === undefined ? "no transcode session on Plex" : `Plex at ${info.speed.toFixed(1)}x`;
+        noteAttempt(plan, `Stalled (${speed}${info?.transcodeHwFullPipeline ? ", full hardware" : info?.transcodeHwRequested ? ", hardware" : ""})`);
         if (!stepDown(live.current.time)) {
           done = true;
           flash("Plex's transcoder can't keep up with this file", 6000);
@@ -529,7 +566,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       done = true;
       window.clearInterval(t);
     };
-  }, [plan, stepDown, flash]);
+  }, [plan, stepDown, flash, noteAttempt]);
 
   // Keep Plex's Continue Watching in step while playing.
   useEffect(() => {
@@ -597,12 +634,24 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       step.current = null;
       triedSteps.current.clear();
       forgetStep(source.current);
+      setAttempts([]);
       setQuality(q);
       live.current.quality = q;
       startStream(replan(q), live.current.time);
     },
     [startStream, replan],
   );
+
+  /** Starts over from the normal plan, as if the lighter ones had never been tried. */
+  const retry = useCallback(() => {
+    if (!source.current || !caps.current) return;
+    step.current = null;
+    triedSteps.current.clear();
+    forgetStep(source.current);
+    forceBurn.current = false;
+    setAttempts([]);
+    startStream(replan(live.current.quality), live.current.time);
+  }, [startStream, replan]);
 
   // Plex picks the tracks on the server, so a change restarts the stream.
   const changeTracks = useCallback(
@@ -817,10 +866,26 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
 
       {error && (
         <div className="absolute inset-0 grid place-items-center bg-black/80">
-          <div className="flex max-w-md flex-col items-center gap-4 text-center">
+          <div className="flex max-w-xl flex-col items-center gap-4 text-center">
             <p className="text-lg font-medium">Couldn't start playback</p>
             <p className="text-muted-foreground text-sm break-all select-text">{error}</p>
-            <Button onClick={onClose}>Back</Button>
+            {attempts.length > 0 && (
+              <ul className="text-muted-foreground w-full space-y-1 text-left text-xs select-text">
+                {attempts.map((a) => (
+                  <li key={a.id}>
+                    <span className="text-foreground">{a.plan}:</span> {a.result}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex gap-2">
+              {info && (
+                <Button variant="secondary" onClick={retry}>
+                  Try again
+                </Button>
+              )}
+              <Button onClick={onClose}>Back</Button>
+            </div>
           </div>
         </div>
       )}

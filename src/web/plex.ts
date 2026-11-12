@@ -983,6 +983,25 @@ export function streamUrl(ratingKey: string, plan: PlaybackPlan, opts: StreamOpt
 }
 
 /**
+ * Why Plex refused a stream URL from `streamUrl`, in Plex's own words (e.g.
+ * "Not enough CPU for conversion of this item"), or null when it won't say.
+ * Asks the transcoder's decision endpoint with the same parameters.
+ */
+export async function streamRefusal(url: string): Promise<string | null> {
+  try {
+    const body = await request<{ MediaContainer?: Record<string, unknown> }>(url.replace("/universal/start.m3u8", "/universal/decision"));
+    const c = body.MediaContainer ?? {};
+    const texts = [c.transcodeDecisionText, c.directPlayDecisionText, c.generalDecisionText]
+      .filter((t): t is string => typeof t === "string" && t.length > 0);
+    const codes = [c.transcodeDecisionCode, c.generalDecisionCode].filter((n) => typeof n === "number");
+    if (texts.length === 0) return null;
+    return `${texts[0]}${codes.length ? ` (code ${codes[0]})` : ""}`;
+  } catch (e) {
+    return e instanceof Error ? e.message : null;
+  }
+}
+
+/**
  * The subtitle stream's text as Plex stores it (SRT, WebVTT or ASS/SSA); the
  * caller converts. Plex serves external subtitles here; embedded text ones may
  * or may not work, so the caller falls back to burning on failure.
