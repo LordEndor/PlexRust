@@ -4,7 +4,7 @@ import { Check, Play } from "lucide-react";
 import { ItemContextMenu } from "@/components/ItemMenu";
 import { imageUrl, type Metadata } from "@/lib/api";
 import { isWatched, progress, subtitle, unwatchedCount } from "@/lib/format";
-import { useNav } from "@/lib/nav";
+import { useNav, type Route } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 const POSTER = { w: 180, h: 270 };
@@ -52,6 +52,21 @@ interface Props {
   className?: string;
   /** Shown in Continue Watching or On Deck: its menu can take it off, and it gets a Play button. */
   continueWatching?: boolean;
+  /** An episode opens its show, at that episode, rather than its own page (as in Recently added). */
+  openInShow?: boolean;
+}
+
+function routeFor(item: Metadata, openInShow?: boolean): Route {
+  if (item.type === "playlist") return { name: "playlist", ratingKey: item.ratingKey };
+  if (openInShow && item.type === "episode" && item.grandparentRatingKey) {
+    return {
+      name: "item",
+      ratingKey: item.grandparentRatingKey,
+      episode: item.ratingKey,
+      season: item.parentRatingKey ?? undefined,
+    };
+  }
+  return { name: "item", ratingKey: item.ratingKey };
 }
 
 /** Starts the item straight from its thumbnail, skipping its page. */
@@ -77,7 +92,7 @@ function PlayButton({ item }: { item: Metadata }) {
   );
 }
 
-export function Poster({ item, wide, className, continueWatching }: Props) {
+export function Poster({ item, wide, className, continueWatching, openInShow }: Props) {
   const { server, navigate } = useNav();
   const size = wide ? WIDE : POSTER;
   const src = imageUrl(server, wide ? widePath(item) : posterPath(item), size.w, size.h);
@@ -87,13 +102,7 @@ export function Poster({ item, wide, className, continueWatching }: Props) {
     <ItemContextMenu item={item} continueWatching={continueWatching}>
       <div className="group/poster relative">
         <button
-          onClick={() =>
-            navigate(
-              item.type === "playlist"
-                ? { name: "playlist", ratingKey: item.ratingKey }
-                : { name: "item", ratingKey: item.ratingKey },
-            )
-          }
+          onClick={() => navigate(routeFor(item, openInShow))}
           className={cn("group flex w-full flex-col gap-2 text-left outline-none", className)}
         >
           <div

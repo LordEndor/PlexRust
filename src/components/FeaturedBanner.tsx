@@ -11,7 +11,7 @@ const ROTATE_MS = 9000;
 const MAX = 6;
 
 /** Home's Recently Added rows: `home.movies.recent`, `home.television.recent`, or a library's `movie.recentlyadded`. */
-function isRecentlyAdded(hub: Hub) {
+export function isRecentlyAdded(hub: Hub) {
   return /(\.recent|recentlyadded)$/i.test(hub.hubIdentifier);
 }
 
