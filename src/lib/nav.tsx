@@ -9,7 +9,8 @@ export type Route =
   | { name: "home" }
   /** `sort` and `filters` open the library already sorted and narrowed down, as a custom Home row is. */
   | { name: "library"; section: LibrarySection; sort?: string; filters?: Filters }
-  | { name: "item"; ratingKey: string }
+  /** `episode` (with its `season`) opens a show at that episode, highlighted. */
+  | { name: "item"; ratingKey: string; episode?: string; season?: string }
   | { name: "search"; query: string }
   | { name: "settings" }
   | { name: "discover"; query?: string }
@@ -52,7 +53,7 @@ export function routeKey(r: Route) {
         ? `library:${r.section.key}:${r.sort}:${JSON.stringify(r.filters ?? {})}`
         : `library:${r.section.key}`;
     case "item":
-      return `item:${r.ratingKey}`;
+      return r.episode ? `item:${r.ratingKey}:${r.episode}` : `item:${r.ratingKey}`;
     case "search":
       return `search:${r.query}`;
     case "settings":

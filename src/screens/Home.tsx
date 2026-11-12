@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bookmark,
@@ -67,6 +67,32 @@ function readCollapsed() {
   }
 }
 
+/**
+ * Each in-app page is also a browser history entry holding the whole stack, so
+ * the mouse's back and forward buttons (and the browser's own, on the web)
+ * move through the app instead of leaving it.
+ */
+interface HistoryState {
+  plexrust: Route[];
+  /** Entries left from another server are skipped. */
+  server: string;
+}
+
+function historyStack(state: unknown, server: string): Route[] | null {
+  const s = state as HistoryState | null;
+  return s?.server === server && Array.isArray(s.plexrust) && s.plexrust.length > 0 ? s.plexrust : null;
+}
+
+function writeHistory(stack: Route[], server: string, replace: boolean) {
+  const state: HistoryState = { plexrust: stack, server };
+  try {
+    if (replace) history.replaceState(state, "");
+    else history.pushState(state, "");
+  } catch {
+    // A route that can't be stored only costs that history entry.
+  }
+}
+
 function iconFor(type: string) {
   return sectionIcon[type as keyof typeof sectionIcon] ?? Clapperboard;
 }
@@ -83,7 +109,19 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
   const [error, setError] = useState<string | null>(null);
   // Every screen in the stack stays mounted (just hidden), so going back is
   // instant and keeps its scroll position.
-  const [stack, setStack] = useState<Route[]>([{ name: "home" }]);
+  const [stack, setStackState] = useState<Route[]>([{ name: "home" }]);
+  const stackRef = useRef(stack);
+  const serverRef = useRef(server.machineId);
+  serverRef.current = server.machineId;
+  // Moves to a new stack, as a new history entry or in place of the current one.
+  const setStack = useCallback((next: Route[] | ((s: Route[]) => Route[]), replace = false) => {
+    const prev = stackRef.current;
+    const value = typeof next === "function" ? next(prev) : next;
+    if (value === prev) return;
+    stackRef.current = value;
+    writeHistory(value, serverRef.current, replace);
+    setStackState(value);
+  }, []);
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const requestsEnabled = useSeerrEnabled();
@@ -111,7 +149,7 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
 
   useEffect(() => {
     setSections(null);
-    setStack([{ name: "home" }]);
+    setStack([{ name: "home" }], true);
     api
       .librarySections()
       .then(setSections)
@@ -119,18 +157,27 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
         setError(errorMessage(e));
         setSections([]);
       });
-  }, [server.machineId]);
+  }, [server.machineId, setStack]);
 
-  const navigate = useCallback((route: Route) => {
-    setStack((s) => {
+  const navigate = useCallback(
+    (route: Route) => {
+      const s = stackRef.current;
       const top = s[s.length - 1];
-      if (routeKey(top) === routeKey(route)) return s;
-      const base = route.name === "search" && top.name === "search" ? s.slice(0, -1) : s;
-      return [...base, route].slice(-MAX_STACK);
-    });
-  }, []);
+      if (routeKey(top) === routeKey(route)) return;
+      // Typing a search refines it rather than adding a page per letter.
+      if (route.name === "search" && top.name === "search") return setStack([...s.slice(0, -1), route], true);
+      setStack([...s, route].slice(-MAX_STACK));
+    },
+    [setStack],
+  );
 
-  const back = useCallback(() => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s)), []);
+  // Going back steps back through history, which then sets the stack (below).
+  const back = useCallback(() => {
+    if (stackRef.current.length < 2) return;
+    if (historyStack(history.state, serverRef.current)) history.back();
+    else setStack((s) => s.slice(0, -1), true);
+  }, [setStack]);
+  const forward = useCallback(() => history.forward(), []);
   const goRoot = (route: Route) => setStack([route]);
   // The next episode replaces the current one, so Back still leads to where playback started.
   const playNext = useCallback(
@@ -139,24 +186,56 @@ export function Home({ user, server, onSwitchServer, onSignOut }: Props) {
         const top = s[s.length - 1];
         const playlist = top.name === "player" ? top.playlist : undefined;
         return [...s.slice(0, -1), { name: "player", ratingKey, resume: false, playlist }];
-      }),
-    [],
+      }, true),
+    [setStack],
   );
 
   useEffect(() => {
-    const onMouse = (e: MouseEvent) => e.button === 3 && back();
+    const onPop = (e: PopStateEvent) => {
+      const next = historyStack(e.state, serverRef.current);
+      if (!next) return;
+      const was = stackRef.current;
+      // Forward never starts playback again; it skips past the player.
+      if (next[next.length - 1].name === "player" && was[was.length - 1].name !== "player") {
+        history.back();
+        return;
+      }
+      stackRef.current = next;
+      setStackState(next);
+    };
+    // Mouse buttons 4 and 5. Browsers usually turn these into history moves
+    // themselves; where they don't (or the click lands on the video), this does.
+    let popped = 0;
+    const notePop = () => (popped = Date.now());
+    const onMouse = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      const pressed = Date.now();
+      const go = e.button === 3 ? back : forward;
+      setTimeout(() => popped < pressed && go(), 80);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (document.documentElement.classList.contains("playing")) return;
       const typing = e.target instanceof HTMLInputElement;
-      if ((e.altKey && e.key === "ArrowLeft") || (e.key === "Backspace" && !typing) || (e.key === "Escape" && !typing)) back();
+      if ((e.altKey && e.key === "ArrowLeft") || (e.key === "Backspace" && !typing) || (e.key === "Escape" && !typing)) {
+        e.preventDefault();
+        back();
+      } else if (e.altKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        forward();
+      }
     };
+    window.addEventListener("popstate", notePop);
+    window.addEventListener("popstate", onPop);
     window.addEventListener("mouseup", onMouse);
     window.addEventListener("keydown", onKey);
     return () => {
+      window.removeEventListener("popstate", notePop);
+      window.removeEventListener("popstate", onPop);
       window.removeEventListener("mouseup", onMouse);
       window.removeEventListener("keydown", onKey);
     };
-  }, [back]);
+  }, [back, forward]);
 
   // Search as you type, after a short pause.
   useEffect(() => {
@@ -358,7 +437,7 @@ function Screen({ route }: { route: Route }) {
     case "library":
       return <LibraryView section={route.section} sort={route.sort} filters={route.filters} />;
     case "item":
-      return <ItemView ratingKey={route.ratingKey} />;
+      return <ItemView ratingKey={route.ratingKey} episode={route.episode} season={route.season} />;
     case "search":
       return <SearchView query={route.query} />;
     case "settings":

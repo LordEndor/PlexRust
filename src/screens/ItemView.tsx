@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bookmark, BookmarkCheck, Check, Clapperboard, Ellipsis, Play, RotateCcw, Star } from "lucide-react";
 
 import { InfoDialog } from "@/components/InfoDialog";
@@ -30,7 +30,11 @@ import { tmdbImage, type SeerrEpisode, type SeerrSeason } from "@/lib/seerr";
 import { canWatchlist, watchlist } from "@/lib/watchlist";
 import { PlaylistView } from "@/screens/PlaylistView";
 
-export function ItemView({ ratingKey }: { ratingKey: string }) {
+/**
+ * `episode` and its `season` open a show at that episode: its season's episodes
+ * are listed on the show's page with the episode highlighted.
+ */
+export function ItemView({ ratingKey, episode, season }: { ratingKey: string; episode?: string; season?: string }) {
   const [item, setItem] = useState<Metadata | null>(null);
   const [children, setChildren] = useState<Metadata[] | null>(null);
   const [extras, setExtras] = useState<Metadata[]>([]);
@@ -90,24 +94,30 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
   // A show with one season lists that season's episodes on its own page.
   const onlySeason =
     item?.type === "show" && prefs?.skipSingleSeason && children?.length === 1 ? children[0] : null;
+  // Opened at an episode, the show lists that episode's season above the others.
+  const pickedSeason =
+    item?.type === "show" && episode && !onlySeason
+      ? (children?.find((c) => c.ratingKey === season) ?? null)
+      : null;
+  const listedSeason = onlySeason ?? pickedSeason;
   const [seasonEpisodes, setSeasonEpisodes] = useState<Metadata[] | null>(null);
   useEffect(() => {
     setSeasonEpisodes(null);
-    if (!onlySeason) return;
+    if (!listedSeason) return;
     let live = true;
     library
-      .children(onlySeason.ratingKey)
+      .children(listedSeason.ratingKey)
       .then((e) => live && setSeasonEpisodes(e))
       .catch((e) => live && setError(errorMessage(e)));
     return () => {
       live = false;
     };
-  }, [onlySeason]);
+  }, [listedSeason]);
 
   const missing = useMissing(item, children, {
     seasons: !!prefs?.missingSeasons,
     episodes: !!prefs?.missingEpisodes,
-    season: onlySeason?.index != null ? { index: onlySeason.index, episodes: seasonEpisodes } : null,
+    season: listedSeason?.index != null ? { index: listedSeason.index, episodes: seasonEpisodes } : null,
   });
 
   const trailer = extras.find((x) => x.extraType === 1) ?? null;
@@ -128,16 +138,33 @@ export function ItemView({ ratingKey }: { ratingKey: string }) {
                 episodes={seasonEpisodes}
                 missing={missing?.episodes}
                 tmdbId={missing?.tmdbId}
+                highlight={episode}
               />
               {!!missing?.seasons.length && (
                 <Seasons title="More seasons" seasons={[]} missing={missing.seasons} tmdbId={missing.tmdbId} />
               )}
             </>
           ) : (
-            <Seasons seasons={children} missing={missing?.seasons} tmdbId={missing?.tmdbId} />
+            <>
+              {pickedSeason && (
+                <Episodes
+                  title={pickedSeason.title || "Episodes"}
+                  episodes={seasonEpisodes}
+                  missing={missing?.episodes}
+                  tmdbId={missing?.tmdbId}
+                  highlight={episode}
+                />
+              )}
+              <Seasons
+                title={pickedSeason ? "All seasons" : undefined}
+                seasons={children}
+                missing={missing?.seasons}
+                tmdbId={missing?.tmdbId}
+              />
+            </>
           ))}
         {item.type === "season" && (
-          <Episodes episodes={children} missing={missing?.episodes} tmdbId={missing?.tmdbId} />
+          <Episodes episodes={children} missing={missing?.episodes} tmdbId={missing?.tmdbId} highlight={episode} />
         )}
         {item.type === "collection" && <Seasons seasons={children} title="In this collection" />}
         {item.Role.length > 0 && <Cast item={item} />}
@@ -483,12 +510,15 @@ function Episodes({
   title = "Episodes",
   missing = [],
   tmdbId,
+  highlight,
 }: {
   episodes: Metadata[] | null;
   title?: string;
   /** Episodes the server doesn't have, shown greyed out in order among the others. */
   missing?: SeerrEpisode[];
   tmdbId?: number;
+  /** An episode to mark and scroll to. */
+  highlight?: string;
 }) {
   const { server, navigate } = useNav();
   const rows =
@@ -506,7 +536,13 @@ function Episodes({
         m ? (
           <MissingEpisode key={`missing-${m.episodeNumber}`} episode={m} tmdbId={tmdbId} />
         ) : (
-          <EpisodeRow key={e!.ratingKey} e={e!} server={server} navigate={navigate} />
+          <EpisodeRow
+            key={e!.ratingKey}
+            e={e!}
+            server={server}
+            navigate={navigate}
+            highlighted={e!.ratingKey === highlight}
+          />
         ),
       )}
     </section>
@@ -517,45 +553,75 @@ function EpisodeRow({
   e,
   server,
   navigate,
+  highlighted,
 }: {
   e: Metadata;
   server: ReturnType<typeof useNav>["server"];
   navigate: ReturnType<typeof useNav>["navigate"];
+  highlighted?: boolean;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Brought into view once, when the page opens at this episode.
+  useEffect(() => {
+    if (highlighted) ref.current?.scrollIntoView({ block: "center" });
+  }, [highlighted]);
+  const resume = progress(e) > 0;
   return (
-        <ItemContextMenu key={e.ratingKey} item={e}>
+    <ItemContextMenu key={e.ratingKey} item={e}>
+      <div ref={ref} className="group/episode relative">
+        <button
+          onClick={() => navigate({ name: "item", ratingKey: e.ratingKey })}
+          className={cn(
+            "hover:bg-card flex w-full gap-5 rounded-xl p-2 text-left transition-colors",
+            highlighted && "bg-card ring-primary ring-2",
+          )}
+        >
+          <div className="bg-card relative aspect-video w-56 shrink-0 overflow-hidden rounded-lg border">
+            {e.thumb && (
+              <img
+                src={imageUrl(server, e.thumb, 224, 126)}
+                alt=""
+                loading="lazy"
+                className="size-full object-cover"
+              />
+            )}
+            {isWatched(e) && (
+              <span className="absolute top-2 right-2 grid size-6 place-items-center rounded-full bg-black/70">
+                <Check className="size-3.5" />
+              </span>
+            )}
+            <ProgressBar value={progress(e)} />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1 py-1">
+            <div className="font-medium">
+              <span className="text-muted-foreground mr-2">{e.index}</span>
+              {e.title}
+            </div>
+            <div className="text-muted-foreground text-xs">
+              {[formatDuration(e.duration), e.originallyAvailableAt].filter(Boolean).join(" · ")}
+            </div>
+            {e.summary && <p className="text-muted-foreground line-clamp-2 text-sm">{e.summary}</p>}
+          </div>
+        </button>
+        {/* Plays the episode straight away, over its thumbnail. */}
+        <div className="pointer-events-none absolute top-2 left-2 grid aspect-video w-56 place-items-center">
           <button
-            onClick={() => navigate({ name: "item", ratingKey: e.ratingKey })}
-            className="hover:bg-card group flex gap-5 rounded-xl p-2 text-left transition-colors"
+            type="button"
+            aria-label={`${resume ? "Resume" : "Play"} ${e.title}`}
+            title={resume ? "Resume" : "Play"}
+            onClick={() => navigate({ name: "player", ratingKey: e.ratingKey, resume })}
+            className={cn(
+              "bg-primary text-primary-foreground pointer-events-auto grid size-11 place-items-center rounded-full shadow-lg outline-none",
+              "scale-90 opacity-0 transition-all duration-200 group-hover/episode:scale-100 group-hover/episode:opacity-100",
+              "hover:bg-primary/90 focus-visible:ring-ring/50 focus-visible:scale-100 focus-visible:opacity-100 focus-visible:ring-[3px]",
+              highlighted && "scale-100 opacity-100",
+            )}
           >
-            <div className="bg-card relative aspect-video w-56 shrink-0 overflow-hidden rounded-lg border">
-              {e.thumb && (
-                <img
-                  src={imageUrl(server, e.thumb, 224, 126)}
-                  alt=""
-                  loading="lazy"
-                  className="size-full object-cover"
-                />
-              )}
-              {isWatched(e) && (
-                <span className="absolute top-2 right-2 grid size-6 place-items-center rounded-full bg-black/70">
-                  <Check className="size-3.5" />
-                </span>
-              )}
-              <ProgressBar value={progress(e)} />
-            </div>
-            <div className="flex min-w-0 flex-col gap-1 py-1">
-              <div className="font-medium">
-                <span className="text-muted-foreground mr-2">{e.index}</span>
-                {e.title}
-              </div>
-              <div className="text-muted-foreground text-xs">
-                {[formatDuration(e.duration), e.originallyAvailableAt].filter(Boolean).join(" · ")}
-              </div>
-              {e.summary && <p className="text-muted-foreground line-clamp-2 text-sm">{e.summary}</p>}
-            </div>
+            <Play className="ml-0.5 size-5 fill-current" />
           </button>
-        </ItemContextMenu>
+        </div>
+      </div>
+    </ItemContextMenu>
   );
 }
 

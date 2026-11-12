@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { isRecentlyAdded } from "@/components/FeaturedBanner";
 import { Poster } from "@/components/Poster";
 import type { Hub } from "@/lib/api";
 import { posterSize, usePrefs } from "@/lib/prefs";
@@ -15,6 +16,7 @@ function isWide(hub: Hub) {
 export function HubRow({ hub, onShowAll }: { hub: Hub; onShowAll?: () => void }) {
   const scroller = useRef<HTMLDivElement>(null);
   const wide = isWide(hub);
+  const recent = isRecentlyAdded(hub);
   const size = posterSize(usePrefs());
 
   function scroll(dir: 1 | -1) {
@@ -50,7 +52,7 @@ export function HubRow({ hub, onShowAll }: { hub: Hub; onShowAll?: () => void })
       >
         {hub.Metadata.map((m) => (
           <div key={m.ratingKey} className="shrink-0 snap-start" style={{ width: wide ? size.wide : size.poster }}>
-            <Poster item={m} wide={wide} continueWatching={wide} />
+            <Poster item={m} wide={wide} continueWatching={wide} openInShow={recent} />
           </div>
         ))}
       </div>
