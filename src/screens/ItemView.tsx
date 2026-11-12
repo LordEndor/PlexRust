@@ -31,8 +31,8 @@ import { canWatchlist, watchlist } from "@/lib/watchlist";
 import { PlaylistView } from "@/screens/PlaylistView";
 
 /**
- * `episode` and its `season` open a show at that episode: its season's episodes
- * are listed on the show's page with the episode highlighted.
+ * `season` opens a show at that season: its episodes are listed on the show's
+ * page, with `episode` (when given) highlighted.
  */
 export function ItemView({ ratingKey, episode, season }: { ratingKey: string; episode?: string; season?: string }) {
   const [item, setItem] = useState<Metadata | null>(null);
@@ -94,9 +94,9 @@ export function ItemView({ ratingKey, episode, season }: { ratingKey: string; ep
   // A show with one season lists that season's episodes on its own page.
   const onlySeason =
     item?.type === "show" && prefs?.skipSingleSeason && children?.length === 1 ? children[0] : null;
-  // Opened at an episode, the show lists that episode's season above the others.
+  // Opened at a season (or an episode in it), the show lists that season above the others.
   const pickedSeason =
-    item?.type === "show" && episode && !onlySeason
+    item?.type === "show" && season && !onlySeason
       ? (children?.find((c) => c.ratingKey === season) ?? null)
       : null;
   const listedSeason = onlySeason ?? pickedSeason;
