@@ -108,9 +108,10 @@ export interface PlaybackPlan {
 
 /**
  * The steps down when a transcode stalls, lightest last: stop burning text
- * subtitles, 1080p, the untouched picture (remux), 720p.
+ * subtitles, 1080p, the untouched picture (remux), 720p, and last the
+ * untouched picture without the subtitle Plex would have to burn in.
  */
-export type LighterStep = "subs" | "1080p" | "original" | "720p";
+export type LighterStep = "subs" | "1080p" | "original" | "720p" | "nosubs";
 
 /** Live numbers from Plex's `/transcode/sessions` for the stats overlay. */
 export interface TranscodeSessionInfo {

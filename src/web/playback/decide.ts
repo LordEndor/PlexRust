@@ -11,6 +11,11 @@ import {
 
 const TEXT_SUBS = new Set(["srt", "subrip", "webvtt", "vtt", "mov_text", "text", "ass", "ssa"]);
 
+/** A subtitle the browser can draw itself, if Plex hands out its text. */
+export function isTextSubtitle(codec: string): boolean {
+  return TEXT_SUBS.has(codec);
+}
+
 function subtitleDelivery(source: SourceMedia, opts: DecideOptions): SubtitleDelivery {
   const sub = source.subtitle;
   if (!sub) return { kind: "none" };
@@ -172,8 +177,9 @@ const STALLED = "Plex couldn't keep up with the re-encode";
  * than the last transcode: text subtitles drawn by the browser instead of
  * burned in (burning takes the video off the GPU), then 1080p, then the
  * untouched picture remuxed (no re-encode at all; an SDR screen leaves the HDR
- * tone mapping to the browser), then 720p. Empty when the normal plan isn't a
- * transcode.
+ * tone mapping to the browser), then 720p, and finally the untouched picture
+ * without a subtitle that can only be burned in. Empty when the normal plan
+ * isn't a transcode.
  */
 export function lighterPlans(
   source: SourceMedia,
@@ -217,5 +223,14 @@ export function lighterPlans(
   }
 
   smaller("720p", 1280, 720, 4000);
+
+  // Last resort: a subtitle that has to be burned in needs a re-encode, and
+  // this server can't do one. The picture without it beats no picture.
+  if (quality.maxBitrateKbps === null && decodes && text.kind === "burn") {
+    plans.push({
+      ...directStreamPlan(source, caps, { kind: "none" }, a, [`${STALLED}: playing the original picture without subtitles, which Plex would have to burn in`]),
+      step: "nosubs",
+    });
+  }
   return plans;
 }
