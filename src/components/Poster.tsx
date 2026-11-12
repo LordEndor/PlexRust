@@ -52,7 +52,7 @@ interface Props {
   className?: string;
   /** Shown in Continue Watching or On Deck: its menu can take it off, and it gets a Play button. */
   continueWatching?: boolean;
-  /** An episode opens its show, at that episode, rather than its own page (as in Recently added). */
+  /** An episode or season opens its show, at that season, rather than its own page (as in Recently added). */
   openInShow?: boolean;
 }
 
@@ -65,6 +65,9 @@ function routeFor(item: Metadata, openInShow?: boolean): Route {
       episode: item.ratingKey,
       season: item.parentRatingKey ?? undefined,
     };
+  }
+  if (openInShow && item.type === "season" && item.parentRatingKey) {
+    return { name: "item", ratingKey: item.parentRatingKey, season: item.ratingKey };
   }
   return { name: "item", ratingKey: item.ratingKey };
 }
