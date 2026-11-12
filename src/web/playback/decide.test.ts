@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decide, fallback } from "./decide";
+import { decide, fallback, lighterPlans } from "./decide";
 import type { BrowserCaps, QualityChoice, SourceMedia, SubtitleSource } from "./types";
 
 const original: QualityChoice = { label: "Original", name: "Original", maxBitrateKbps: null, maxWidth: 3840, maxHeight: 2160 };
@@ -188,5 +188,46 @@ describe("fallback", () => {
   it("keeps external text subtitles as sidecars when transcoding", () => {
     const plan = decide({ ...mp4, videoCodec: "mpeg2video", subtitle: sub("srt", true) }, chrome, original);
     expect(plan.subtitles.kind).toBe("sidecar");
+  });
+});
+
+describe("lighterPlans", () => {
+  // Albin's file: 4K Dolby Vision HEVC at 6.8 Mbps with an embedded SRT, on an SDR screen.
+  const dolbyVision: SourceMedia = { ...hevcMkv, width: 3840, height: 2160, bitrateKbps: 6800, hdr: true, dolbyVision: true, subtitle: sub("srt") };
+
+  it("caps an Original transcode at three times the source bitrate", () => {
+    const plan = decide(dolbyVision, edge, original);
+    expect(plan.mode).toBe("transcode");
+    expect(plan.subtitles.kind).toBe("burn");
+    expect(plan.maxBitrateKbps).toBe(20400);
+  });
+
+  it("steps from burned text subtitles to 1080p, the original picture, then 720p", () => {
+    const plans = lighterPlans(dolbyVision, edge, original);
+    expect(plans.map((p) => p.step)).toEqual(["subs", "1080p", "original", "720p"]);
+    const [subs, hd, remux, small] = plans;
+    expect(subs).toMatchObject({ mode: "transcode", maxHeight: 1440, subtitles: { kind: "sidecar" } });
+    expect(hd).toMatchObject({ mode: "transcode", maxWidth: 1920, maxHeight: 1080, maxBitrateKbps: 10000, subtitles: { kind: "sidecar" } });
+    expect(remux).toMatchObject({ mode: "directStream", videoCodecOut: "hevc", subtitles: { kind: "sidecar" } });
+    expect(small).toMatchObject({ mode: "transcode", maxHeight: 720, maxBitrateKbps: 4000 });
+  });
+
+  it("keeps burning when Plex won't hand out the subtitle, and skips the remux", () => {
+    const plans = lighterPlans(dolbyVision, edge, original, { sidecarFailed: true });
+    expect(plans.map((p) => p.step)).toEqual(["1080p", "720p"]);
+    expect(plans.every((p) => p.subtitles.kind === "burn")).toBe(true);
+  });
+
+  it("has no remux step when the browser can't decode the video", () => {
+    expect(lighterPlans(dolbyVision, chrome, original).map((p) => p.step)).toEqual(["subs", "1080p", "720p"]);
+  });
+
+  it("only goes smaller than the picked quality, and never to the untouched file", () => {
+    expect(lighterPlans({ ...dolbyVision, subtitle: null }, edge, eightMbps).map((p) => p.step)).toEqual(["720p"]);
+    expect(lighterPlans({ ...dolbyVision, subtitle: null }, edge, eightMbps)[0].maxBitrateKbps).toBe(4000);
+  });
+
+  it("is empty when the file doesn't need a transcode", () => {
+    expect(lighterPlans(mp4, chrome, original)).toEqual([]);
   });
 });
