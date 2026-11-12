@@ -47,6 +47,19 @@ export async function attachSubtitles(video: HTMLVideoElement, delivery: Subtitl
   return attachVtt(video, format === "vtt" ? text.replace(/^﻿/, "") : srtToVtt(text));
 }
 
+/**
+ * Whether Plex hands out this subtitle as text. Asked before the stream
+ * starts, so a subtitle that has to be burned in doesn't cost a second start.
+ */
+export async function subtitleTextAvailable(streamId: number, external: boolean): Promise<boolean> {
+  try {
+    const res = await fetch(subtitleUrl(streamId, "vtt", external), { signal: AbortSignal.timeout(5000) });
+    return res.ok && (await res.text()).trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function attachVtt(video: HTMLVideoElement, vtt: string): () => void {
   ensureCueStyle();
   const url = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));

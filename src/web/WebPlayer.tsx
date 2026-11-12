@@ -59,11 +59,11 @@ import {
   type WebPlaybackInfo,
 } from "@/web/plex";
 import { detectCaps } from "@/web/playback/caps";
-import { decide, fallback, lighterPlans } from "@/web/playback/decide";
+import { decide, fallback, isTextSubtitle, lighterPlans } from "@/web/playback/decide";
 import { forgetStep, rememberedStep, rememberStep, STALL_SECS, STALL_SECS_HARD, tickStarved } from "@/web/playback/lighter";
 import { sourceFor } from "@/web/playback/source";
 import { StatsOverlay } from "@/web/playback/StatsOverlay";
-import { attachSubtitles } from "@/web/playback/subtitles";
+import { attachSubtitles, subtitleTextAvailable } from "@/web/playback/subtitles";
 import {
   ORIGINAL_TRANSCODE_MAX,
   type BrowserCaps,
@@ -125,6 +125,7 @@ const STEP_NOTICE: Record<LighterStep, string> = {
   "1080p": "Plex can't keep up: lowering to 1080p",
   original: "Plex can't keep up: playing the original picture instead",
   "720p": "Plex can't keep up: lowering to 720p",
+  nosubs: "Plex can't re-encode this file: playing the original picture without subtitles",
 };
 
 
@@ -326,9 +327,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     [lighter, flash],
   );
 
-  /** Recomputes the source for the picked tracks. */
-  const resource = useCallback((pi: WebPlaybackInfo) => {
-    source.current = sourceFor(pi, tracks.current.audio, tracks.current.sub);
+  /** Recomputes the source for the picked tracks, and whether its subtitle has to be burned in. */
+  const resource = useCallback(async (pi: WebPlaybackInfo) => {
+    const src = sourceFor(pi, tracks.current.audio, tracks.current.sub);
+    source.current = src;
+    forceBurn.current = false;
+    const sub = src.subtitle;
+    if (sub && isTextSubtitle(sub.codec)) {
+      forceBurn.current = !(await subtitleTextAvailable(sub.streamId, sub.external));
+    }
   }, []);
 
   const startRef = useRef<(p: PlaybackPlan, at: number, fresh?: boolean) => void>(() => {});
@@ -496,13 +503,13 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         setQuality(q);
         live.current.quality = q;
         caps.current = detected;
-        forceBurn.current = false;
-        resource(pi);
+        await resource(pi);
+        if (disposed) return;
         // A file like one Plex couldn't keep up with earlier starts on the plan that worked then.
         triedSteps.current.clear();
         step.current = rememberedStep(source.current!);
         if (step.current) {
-          for (const l of lighterPlans(source.current!, detected, q)) {
+          for (const l of lighter(q)) {
             if (l.step === step.current) break;
             triedSteps.current.add(l.step!);
           }
@@ -667,10 +674,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         if (patch.subtitleStreamID !== undefined) {
           setSubId(patch.subtitleStreamID);
           tracks.current.sub = patch.subtitleStreamID;
-          forceBurn.current = false;
         }
         if (!caps.current) return;
-        resource(pi);
+        await resource(pi);
         startStream(replan(live.current.quality), live.current.time);
       } catch (e) {
         flash(`Couldn't change track: ${errorMessage(e)}`);

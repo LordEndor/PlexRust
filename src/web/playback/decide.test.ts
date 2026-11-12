@@ -214,8 +214,9 @@ describe("lighterPlans", () => {
 
   it("keeps burning when Plex won't hand out the subtitle, and skips the remux", () => {
     const plans = lighterPlans(dolbyVision, edge, original, { sidecarFailed: true });
-    expect(plans.map((p) => p.step)).toEqual(["1080p", "720p"]);
-    expect(plans.every((p) => p.subtitles.kind === "burn")).toBe(true);
+    expect(plans.map((p) => p.step)).toEqual(["1080p", "720p", "nosubs"]);
+    expect(plans.slice(0, 2).every((p) => p.subtitles.kind === "burn")).toBe(true);
+    expect(plans[2]).toMatchObject({ mode: "directStream", videoCodecOut: "hevc", subtitles: { kind: "none" } });
   });
 
   it("has no remux step when the browser can't decode the video", () => {
