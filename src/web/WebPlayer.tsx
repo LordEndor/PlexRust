@@ -4,7 +4,8 @@
  * hands the file to the <video> element, direct stream and transcode play
  * Plex's HLS through hls.js (or natively in Safari). Text subtitles are drawn
  * in the browser; image ones are burned in by Plex. When a plan fails it steps
- * down the ladder (direct play, direct stream, transcode). Keeps the desktop
+ * down the ladder (direct play, direct stream, transcode), and when Plex's
+ * transcoder can't keep up it moves to a lighter plan (see lighterPlans). Keeps the desktop
  * player's skip intro/credits and Up Next rules, and a stats overlay (I).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -52,11 +53,13 @@ import {
   selectStreams,
   streamUrl,
   timelineUrl,
+  transcodeSessionInfo,
   type RawStream,
   type WebPlaybackInfo,
 } from "@/web/plex";
 import { detectCaps } from "@/web/playback/caps";
-import { decide, fallback } from "@/web/playback/decide";
+import { decide, fallback, lighterPlans } from "@/web/playback/decide";
+import { forgetStep, rememberedStep, rememberStep, STALL_SECS, STALL_SECS_HARD, tickStarved } from "@/web/playback/lighter";
 import { sourceFor } from "@/web/playback/source";
 import { StatsOverlay } from "@/web/playback/StatsOverlay";
 import { attachSubtitles } from "@/web/playback/subtitles";
@@ -64,6 +67,7 @@ import {
   ORIGINAL_TRANSCODE_MAX,
   type BrowserCaps,
   type DecideOptions,
+  type LighterStep,
   type PlaybackMode,
   type PlaybackPlan,
   type QualityChoice,
@@ -99,7 +103,16 @@ const MODE_LABEL: Record<PlaybackMode, string> = {
   transcode: "Transcode",
 };
 
-const planKey = (p: PlaybackPlan) => `${p.mode}:${p.subtitles.kind}`;
+const planKey = (p: PlaybackPlan) => `${p.mode}:${p.subtitles.kind}:${p.step ?? ""}`;
+
+/** What the viewer is told when the player steps down to a lighter plan. */
+const STEP_NOTICE: Record<LighterStep, string> = {
+  subs: "Plex can't keep up: drawing subtitles in the browser instead",
+  "1080p": "Plex can't keep up: lowering to 1080p",
+  original: "Plex can't keep up: playing the original picture instead",
+  "720p": "Plex can't keep up: lowering to 720p",
+};
+
 
 function streamLabel(s: RawStream) {
   return s.extendedDisplayTitle || s.displayTitle || s.title || `Track ${s.id}`;
@@ -173,6 +186,11 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const startId = useRef(0);
   /** Plans that already failed since the last start the viewer asked for. */
   const failed = useRef(new Set<string>());
+  /** The lighter plan in use because Plex's transcoder couldn't keep up, and the ones already tried. */
+  const step = useRef<LighterStep | null>(null);
+  const triedSteps = useRef(new Set<LighterStep>());
+  /** Seconds the picture has been starved of data; see the watchdog below. */
+  const starved = useRef(0);
   const duration = (info?.durationMs ?? 0) / 1000;
   const live = useRef({ time: 0, duration: 0, paused: false, info: null as WebPlaybackInfo | null, quality });
   live.current = { time, duration, paused, info, quality };
@@ -238,14 +256,47 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     }
   }, []);
 
-  /** Decides how to play the current source at this quality. */
-  const replan = useCallback((q: QualityChoice) => {
-    const opts: DecideOptions = forceBurn.current ? { forceBurn: true } : {};
-    const p = decide(source.current!, caps.current!, q, opts);
-    planRef.current = p;
-    setPlan(p);
-    return p;
-  }, []);
+  /** The lighter plans for the current source, in the order to try them. */
+  const lighter = useCallback(
+    (q: QualityChoice) => lighterPlans(source.current!, caps.current!, q, { sidecarFailed: forceBurn.current }),
+    [],
+  );
+
+  /** Decides how to play the current source at this quality, staying on the lighter step in use. */
+  const replan = useCallback(
+    (q: QualityChoice) => {
+      const opts: DecideOptions = forceBurn.current ? { forceBurn: true } : {};
+      let p = decide(source.current!, caps.current!, q, opts);
+      if (step.current) {
+        const ladder = lighter(q);
+        // The step may be gone (subtitles turned off, say): take the next untried one.
+        p = ladder.find((l) => l.step === step.current) ?? ladder.find((l) => !triedSteps.current.has(l.step!)) ?? p;
+        if (p.step && p.step !== step.current) rememberStep(source.current!, p.step);
+        step.current = p.step ?? null;
+        if (p.step) triedSteps.current.add(p.step);
+      }
+      planRef.current = p;
+      setPlan(p);
+      return p;
+    },
+    [lighter],
+  );
+
+  /** Moves to the next lighter plan, or returns false when none is left. */
+  const stepDown = useCallback(
+    (at: number) => {
+      if (!source.current || !caps.current) return false;
+      const next = lighter(live.current.quality).find((l) => !triedSteps.current.has(l.step!));
+      if (!next) return false;
+      step.current = next.step!;
+      triedSteps.current.add(next.step!);
+      rememberStep(source.current, next.step!);
+      flash(STEP_NOTICE[next.step!], 5000);
+      startRef.current(next, at, false);
+      return true;
+    },
+    [lighter, flash],
+  );
 
   /** Recomputes the source for the picked tracks. */
   const resource = useCallback((pi: WebPlaybackInfo) => {
@@ -264,6 +315,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       stopStream();
       const token = ++startId.current;
       if (fresh) failed.current.clear();
+      starved.current = 0;
       planRef.current = p;
       setPlan(p);
       setBuffering(true);
@@ -275,6 +327,11 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       const fatal = (message: string) => {
         if (token !== startId.current) return;
         failed.current.add(planKey(p));
+        // A lighter plan that fails outright moves on down its own ladder.
+        if (p.step) {
+          if (!stepDown(live.current.time || at)) setError(message);
+          return;
+        }
         const next = fallback(p, src, c, live.current.quality);
         if (next && !failed.current.has(planKey(next))) {
           flash(`${MODE_LABEL[p.mode]} failed, switching to ${MODE_LABEL[next.mode].toLowerCase()}`);
@@ -348,13 +405,14 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
           () => {
             if (token !== startId.current) return;
             forceBurn.current = true;
-            flash("Subtitles are burned in for this file");
-            startRef.current(replan(live.current.quality), live.current.time, true);
+            // On a lighter plan, replan keeps the step (now burning) or moves to the next.
+            if (!p.step) flash("Subtitles are burned in for this file");
+            startRef.current(replan(live.current.quality), live.current.time || at, !p.step);
           },
         );
       }
     },
-    [ratingKey, stopStream, flash, replan],
+    [ratingKey, stopStream, flash, replan, stepDown],
   );
   startRef.current = startStream;
 
@@ -366,6 +424,10 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     const c = caps.current;
     if (!v || !p || !src || !c || hls.current || !v.hasAttribute("src")) return;
     failed.current.add(planKey(p));
+    if (p.step) {
+      if (!stepDown(live.current.time)) setError(v.error?.message || "The browser couldn't play this file.");
+      return;
+    }
     const next = fallback(p, src, c, live.current.quality);
     if (next && !failed.current.has(planKey(next))) {
       flash(`${MODE_LABEL[p.mode]} failed, switching to ${MODE_LABEL[next.mode].toLowerCase()}`);
@@ -373,7 +435,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     } else {
       setError(v.error?.message || "The browser couldn't play this file.");
     }
-  }, [flash]);
+  }, [flash, stepDown]);
 
   // Load the item, apply the language prefs, start streaming; tear down on close.
   useEffect(() => {
@@ -401,7 +463,18 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         caps.current = detected;
         forceBurn.current = false;
         resource(pi);
-        startStream(replan(q), resume ? pi.viewOffsetMs / 1000 : 0);
+        // A file like one Plex couldn't keep up with earlier starts on the plan that worked then.
+        triedSteps.current.clear();
+        step.current = rememberedStep(source.current!);
+        if (step.current) {
+          for (const l of lighterPlans(source.current!, detected, q)) {
+            if (l.step === step.current) break;
+            triedSteps.current.add(l.step!);
+          }
+        }
+        const first = replan(q);
+        if (first.step) flash("Using a lighter stream: Plex couldn't keep up with a file like this earlier. Pick a quality to try again.", 6000);
+        startStream(first, resume ? pi.viewOffsetMs / 1000 : 0);
       } catch (e) {
         if (!disposed) setError(errorMessage(e));
       }
@@ -423,7 +496,40 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       stopStream();
       document.documentElement.classList.remove("playing");
     };
-  }, [ratingKey, resume, report, startStream, stopStream, replan, resource, playlist]);
+  }, [ratingKey, resume, report, startStream, stopStream, replan, resource, playlist, flash]);
+
+  // Watchdog: a transcode Plex can't keep up with (stuck or slower than real
+  // time) would otherwise buffer forever, so step down to a lighter plan.
+  useEffect(() => {
+    if (plan?.mode !== "transcode") return;
+    let checking = false;
+    let done = false;
+    const t = window.setInterval(async () => {
+      const v = video.current;
+      if (!v || v.paused || checking || done) return;
+      starved.current = tickStarved(starved.current, v.readyState < HTMLMediaElement.HAVE_FUTURE_DATA);
+      if (starved.current < STALL_SECS) return;
+      checking = true;
+      try {
+        // Plex keeping up means the wait is something else (a seek, the network): give it longer.
+        const id = session.current;
+        const info = id ? await transcodeSessionInfo(id).catch(() => null) : null;
+        if (done || planRef.current !== plan) return;
+        if ((info?.speed ?? 0) >= 1 && starved.current < STALL_SECS_HARD) return;
+        starved.current = 0;
+        if (!stepDown(live.current.time)) {
+          done = true;
+          flash("Plex's transcoder can't keep up with this file", 6000);
+        }
+      } finally {
+        checking = false;
+      }
+    }, 1000);
+    return () => {
+      done = true;
+      window.clearInterval(t);
+    };
+  }, [plan, stepDown, flash]);
 
   // Keep Plex's Continue Watching in step while playing.
   useEffect(() => {
@@ -458,6 +564,8 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const seekTo = useCallback((secs: number) => {
     const v = video.current;
     if (v) v.currentTime = Math.max(0, Math.min(secs, live.current.duration || secs));
+    // A seek makes Plex start over at the new spot: that wait isn't a stall.
+    starved.current = 0;
   }, []);
   const seekBy = useCallback((secs: number) => seekTo(live.current.time + secs), [seekTo]);
   const toggleFullscreen = useCallback(() => {
@@ -483,7 +591,12 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
 
   const changeQuality = useCallback(
     (q: QualityChoice) => {
-      if (q.label === live.current.quality.label || !source.current || !caps.current) return;
+      if (!source.current || !caps.current) return;
+      // Picking a quality (the current one too) leaves the lighter plan and tries the pick as is.
+      if (q.label === live.current.quality.label && !step.current) return;
+      step.current = null;
+      triedSteps.current.clear();
+      forgetStep(source.current);
       setQuality(q);
       live.current.quality = q;
       startStream(replan(q), live.current.time);
@@ -804,7 +917,10 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" side="top">
-                <DropdownMenuLabel>Quality{plan ? ` · ${MODE_LABEL[plan.mode]}` : ""}</DropdownMenuLabel>
+                <DropdownMenuLabel>
+                  Quality{plan ? ` · ${MODE_LABEL[plan.mode]}` : ""}
+                  {plan?.step && plan.mode === "transcode" && plan.step !== "subs" ? ` at ${plan.step}` : ""}
+                </DropdownMenuLabel>
                 {QUALITY_CHOICES.map((q) => (
                   <DropdownMenuCheckItem key={q.label} checked={q.label === quality.label} onSelect={() => changeQuality(q)}>
                     {q.name}

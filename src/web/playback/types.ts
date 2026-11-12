@@ -102,7 +102,15 @@ export interface PlaybackPlan {
   maxBitrateKbps: number | null;
   /** Plain-English reasons, e.g. "MKV container: remuxing", shown in the stats overlay. */
   reasons: string[];
+  /** Set on a lighter plan picked because Plex's transcoder couldn't keep up (see `lighterPlans`). */
+  step?: LighterStep;
 }
+
+/**
+ * The steps down when a transcode stalls, lightest last: stop burning text
+ * subtitles, 1080p, the untouched picture (remux), 720p.
+ */
+export type LighterStep = "subs" | "1080p" | "original" | "720p";
 
 /** Live numbers from Plex's `/transcode/sessions` for the stats overlay. */
 export interface TranscodeSessionInfo {
@@ -126,4 +134,9 @@ export interface TranscodeSessionInfo {
 export interface DecideOptions {
   /** The sidecar subtitle failed to load: burn it in instead (forces a transcode). */
   forceBurn?: boolean;
+}
+
+export interface LighterOptions {
+  /** Plex wouldn't hand out this subtitle as text: lighter plans keep burning it. */
+  sidecarFailed?: boolean;
 }

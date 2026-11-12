@@ -2,6 +2,7 @@ import {
   ORIGINAL_TRANSCODE_MAX,
   type BrowserCaps,
   type DecideOptions,
+  type LighterOptions,
   type PlaybackPlan,
   type QualityChoice,
   type SourceMedia,
@@ -66,13 +67,30 @@ function transcodeReasons(source: SourceMedia, caps: BrowserCaps, quality: Quali
   return reasons;
 }
 
-function transcodePlan(source: SourceMedia, quality: QualityChoice, subtitles: SubtitleDelivery, reasons: string[]): PlaybackPlan {
+/**
+ * The bitrate cap for an Original transcode. H.264 needs two to three times
+ * the bits of HEVC or AV1, and asking for more than that only makes Plex's
+ * encoder work harder for nothing.
+ */
+function originalCapKbps(source: SourceMedia): number {
+  if (source.bitrateKbps <= 0) return ORIGINAL_TRANSCODE_MAX.kbps;
+  return Math.min(ORIGINAL_TRANSCODE_MAX.kbps, Math.max(8000, source.bitrateKbps * 3));
+}
+
+function transcodePlan(
+  source: SourceMedia,
+  quality: QualityChoice,
+  subtitles: SubtitleDelivery,
+  reasons: string[],
+  keepSidecar = false,
+): PlaybackPlan {
   const original = quality.maxBitrateKbps === null;
   const width = original ? ORIGINAL_TRANSCODE_MAX.width : quality.maxWidth;
   const height = original ? ORIGINAL_TRANSCODE_MAX.height : quality.maxHeight;
   // Plex only hands out sidecar subtitle files as text; embedded ones are
   // burned in, which costs nothing extra when the video is re-encoded anyway.
-  if (subtitles.kind === "sidecar" && !subtitles.external) subtitles = { kind: "burn", streamId: subtitles.streamId };
+  // (Unless that re-encode turned out too heavy: see lighterPlans.)
+  if (!keepSidecar && subtitles.kind === "sidecar" && !subtitles.external) subtitles = { kind: "burn", streamId: subtitles.streamId };
   return {
     mode: "transcode",
     subtitles,
@@ -81,7 +99,7 @@ function transcodePlan(source: SourceMedia, quality: QualityChoice, subtitles: S
     audioCodecOut: "aac",
     maxWidth: source.width > 0 ? Math.min(width, source.width) : width,
     maxHeight: source.height > 0 ? Math.min(height, source.height) : height,
-    maxBitrateKbps: original ? ORIGINAL_TRANSCODE_MAX.kbps : quality.maxBitrateKbps,
+    maxBitrateKbps: original ? originalCapKbps(source) : quality.maxBitrateKbps,
     reasons,
   };
 }
@@ -144,4 +162,60 @@ export function fallback(plan: PlaybackPlan, source: SourceMedia, caps: BrowserC
     return transcodePlan(source, quality, subtitles, ["Direct play failed: re-encoding instead", ...transcodeReasons(source, caps, quality, a)]);
   }
   return transcodePlan(source, quality, subtitles, ["Direct stream failed: re-encoding instead"]);
+}
+
+const STALLED = "Plex couldn't keep up with the re-encode";
+
+/**
+ * Lighter ways to play `source` after its transcode stalled (Plex's transcoder
+ * too slow or stuck), in the order to try them. Each is easier on the server
+ * than the last transcode: text subtitles drawn by the browser instead of
+ * burned in (burning takes the video off the GPU), then 1080p, then the
+ * untouched picture remuxed (no re-encode at all; an SDR screen leaves the HDR
+ * tone mapping to the browser), then 720p. Empty when the normal plan isn't a
+ * transcode.
+ */
+export function lighterPlans(
+  source: SourceMedia,
+  caps: BrowserCaps,
+  quality: QualityChoice,
+  opts: LighterOptions = {},
+): PlaybackPlan[] {
+  const normal = decide(source, caps, quality, { forceBurn: opts.sidecarFailed });
+  if (normal.mode !== "transcode") return [];
+
+  const text = subtitleDelivery(source, { forceBurn: opts.sidecarFailed });
+  const a = assess(source, caps, quality, text);
+  const burnsText = normal.subtitles.kind === "burn" && text.kind === "sidecar";
+  const plans: PlaybackPlan[] = [];
+
+  if (burnsText) {
+    plans.push({
+      ...normal,
+      subtitles: text,
+      step: "subs",
+      reasons: [`${STALLED}: subtitles are drawn by the browser instead of burned in`],
+    });
+  }
+
+  const smaller = (step: "1080p" | "720p", width: number, height: number, kbps: number) => {
+    if (normal.maxHeight <= height && normal.maxWidth <= width) return;
+    const q: QualityChoice = { label: step, name: step, maxBitrateKbps: Math.min(kbps, normal.maxBitrateKbps ?? kbps), maxWidth: width, maxHeight: height };
+    plans.push({ ...transcodePlan(source, q, text, [`${STALLED}: lowered to ${step}`], true), step });
+  };
+
+  smaller("1080p", 1920, 1080, 10_000);
+
+  // Only at Original: a lower quality was picked to save bandwidth, and the
+  // untouched file would ignore that.
+  const decodes = caps.videoCodecs.has(source.videoCodec) && a.tenBitOk && caps.hls !== "none";
+  if (quality.maxBitrateKbps === null && decodes && text.kind !== "burn") {
+    const why = a.hdrProblem
+      ? `${STALLED}: playing the original picture, so HDR colours are up to this browser`
+      : `${STALLED}: playing the original picture`;
+    plans.push({ ...directStreamPlan(source, caps, text, a, [why]), step: "original" });
+  }
+
+  smaller("720p", 1280, 720, 4000);
+  return plans;
 }
