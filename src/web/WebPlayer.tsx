@@ -107,11 +107,18 @@ const MODE_LABEL: Record<PlaybackMode, string> = {
 const planKey = (p: PlaybackPlan) => `${p.mode}:${p.subtitles.kind}:${p.step ?? ""}`;
 
 /** A plan in a few words, for the list of what was tried. */
-function planLabel(p: PlaybackPlan) {
+function planLabel(p: PlaybackPlan, src: SourceMedia | null) {
   const size = p.mode === "transcode" ? ` ${p.maxHeight}p` : "";
   const subs = p.subtitles.kind === "burn" ? ", subtitles burned in" : p.subtitles.kind === "sidecar" ? ", subtitles as text" : "";
-  return `${MODE_LABEL[p.mode]}${size}${subs}`;
+  // What Plex has to convert: a failing converter (EAC3 audio, say) shows up as the common factor.
+  const change = (from: string, to: string) => (from === to ? `${from.toUpperCase()} kept` : `${from.toUpperCase() || "?"} to ${to.toUpperCase()}`);
+  const codecs = src && p.mode !== "directPlay" ? ` (video ${change(src.videoCodec, p.videoCodecOut)}, audio ${change(src.audioCodec, p.audioCodecOut)})` : "";
+  return `${MODE_LABEL[p.mode]}${size}${subs}${codecs}`;
 }
+
+/** The transcoder quit or never produced video, on a plan Plex had accepted. */
+const TRANSCODER_HINT =
+  "Plex accepted the stream but its transcoder stopped. That is a problem on the Plex server, not in this file: the Plex console (Settings, Console) shows the reason.";
 
 interface Attempt {
   id: number;
@@ -303,7 +310,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   /** Notes that `p` failed. Returns the entry's id, so Plex's reason can be added once it answers. */
   const noteAttempt = useCallback((p: PlaybackPlan, result: string) => {
     const id = ++attemptId.current;
-    setAttempts((list) => [...list, { id, plan: planLabel(p), result }]);
+    setAttempts((list) => [...list, { id, plan: planLabel(p, source.current), result }]);
     return id;
   }, []);
 
@@ -367,6 +374,16 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
           streamRefusal(refusedUrl).then((why) => {
             if (why) setAttempts((list) => list.map((a) => (a.id === attempt ? { ...a, result: `${a.result}. Plex says: ${why}` } : a)));
           });
+        }
+        // A segment that fails without an HTTP answer: see whether Plex's transcoder is still there.
+        const sessionId = session.current;
+        if (!refusedUrl && sessionId && p.mode !== "directPlay") {
+          transcodeSessionInfo(sessionId)
+            .then((info) => (info ? `Plex's transcoder is still running at ${(info.speed ?? 0).toFixed(1)}x` : "Plex's transcoder has exited"))
+            .catch(() => null)
+            .then((state) => {
+              if (state) setAttempts((list) => list.map((a) => (a.id === attempt ? { ...a, result: `${a.result}. ${state}` } : a)));
+            });
         }
         failed.current.add(planKey(p));
         // A lighter plan that fails outright moves on down its own ladder.
@@ -543,7 +560,8 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   // Watchdog: a transcode Plex can't keep up with (stuck or slower than real
   // time) would otherwise buffer forever, so step down to a lighter plan.
   useEffect(() => {
-    if (plan?.mode !== "transcode") return;
+    // Nothing is playing behind the error screen: counting that as a stall would only add noise.
+    if (plan?.mode !== "transcode" || error) return;
     let checking = false;
     let done = false;
     const t = window.setInterval(async () => {
@@ -573,7 +591,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       done = true;
       window.clearInterval(t);
     };
-  }, [plan, stepDown, flash, noteAttempt]);
+  }, [plan, error, stepDown, flash, noteAttempt]);
 
   // Keep Plex's Continue Watching in step while playing.
   useEffect(() => {
@@ -875,6 +893,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
           <div className="flex max-w-xl flex-col items-center gap-4 text-center">
             <p className="text-lg font-medium">Couldn't start playback</p>
             <p className="text-muted-foreground text-sm break-all select-text">{error}</p>
+            {attempts.some((a) => /exited|no transcode session|fragLoadError/.test(a.result)) && (
+              <p className="text-muted-foreground text-sm">{TRANSCODER_HINT}</p>
+            )}
             {attempts.length > 0 && (
               <ul className="text-muted-foreground w-full space-y-1 text-left text-xs select-text">
                 {attempts.map((a) => (
