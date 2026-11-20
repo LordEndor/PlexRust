@@ -59,7 +59,7 @@ import {
   type WebPlaybackInfo,
 } from "@/web/plex";
 import { detectCaps } from "@/web/playback/caps";
-import { decide, fallback, isTextSubtitle, lighterPlans } from "@/web/playback/decide";
+import { decide, fallback, isTextSubtitle, lighterPlans, withoutBurn } from "@/web/playback/decide";
 import { forgetStep, rememberedStep, rememberStep, STALL_SECS, STALL_SECS_HARD, tickStarved } from "@/web/playback/lighter";
 import { sourceFor } from "@/web/playback/source";
 import { StatsOverlay } from "@/web/playback/StatsOverlay";
@@ -216,6 +216,18 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   const triedSteps = useRef(new Set<LighterStep>());
   /** Seconds the picture has been starved of data; see the watchdog below. */
   const starved = useRef(0);
+  /**
+   * The stream has played since it started. Until then the <video> reports
+   * 0 (it was just emptied), which must never become the saved position.
+   */
+  const ready = useRef(false);
+  /** Where Try again picks up; read by the load effect. */
+  const resumeAt = useRef<number | null>(null);
+  const [reloads, setReloads] = useState(0);
+  /** Plans whose playlist Plex answered with 404 and that got their one quiet retry. */
+  const retried404 = useRef(new Set<string>());
+  /** How far ahead of the playhead the browser has the video, in seconds of the episode. */
+  const [bufferedTo, setBufferedTo] = useState(0);
   const duration = (info?.durationMs ?? 0) / 1000;
   const live = useRef({ time: 0, duration: 0, paused: false, info: null as WebPlaybackInfo | null, quality });
   live.current = { time, duration, paused, info, quality };
@@ -356,8 +368,15 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       if (!v || !src || !c) return;
       stopStream();
       const token = ++startId.current;
-      if (fresh) failed.current.clear();
+      if (fresh) {
+        failed.current.clear();
+        retried404.current.clear();
+      }
       starved.current = 0;
+      ready.current = false;
+      setTime(at);
+      live.current.time = at;
+      setBufferedTo(0);
       planRef.current = p;
       setPlan(p);
       setBuffering(true);
@@ -386,6 +405,13 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
             });
         }
         failed.current.add(planKey(p));
+        // Burning in subtitles is what Plex refuses most: try the same stream without them first.
+        const bare = withoutBurn(p);
+        if (bare && !failed.current.has(planKey(bare))) {
+          flash("Plex couldn't burn in the subtitles: playing without them", 5000);
+          startRef.current(bare, live.current.time || at, false);
+          return;
+        }
         // A lighter plan that fails outright moves on down its own ladder.
         if (p.step) {
           if (!stepDown(live.current.time || at)) setError(message);
@@ -426,6 +452,17 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
               data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR ||
               data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR ||
               data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT;
+            // A 404 on the playlist is Plex having lost the session (it happens now and
+            // then after a few episodes): a new session usually works, so retry once quietly.
+            if (playlist && data.response?.code === 404 && !retried404.current.has(planKey(p))) {
+              retried404.current.add(planKey(p));
+              setStreamStatus("Plex lost the stream, starting it again");
+              const resumeFrom = live.current.time || at;
+              window.setTimeout(() => {
+                if (token === startId.current) startRef.current(p, resumeFrom, false);
+              }, 1500);
+              return;
+            }
             if (!recovered && !playlist && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
               recovered = true;
               h.startLoad();
@@ -533,7 +570,9 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         }
         const first = replan(q);
         if (first.step) flash("Using a lighter stream: Plex couldn't keep up with a file like this earlier. Pick a quality to try again.", 6000);
-        startStream(first, resume ? pi.viewOffsetMs / 1000 : 0);
+        const from = resumeAt.current ?? (resume ? pi.viewOffsetMs / 1000 : 0);
+        resumeAt.current = null;
+        startStream(first, from);
       } catch (e) {
         if (!disposed) setError(errorMessage(e));
       }
@@ -555,7 +594,13 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
       stopStream();
       document.documentElement.classList.remove("playing");
     };
-  }, [ratingKey, resume, report, startStream, stopStream, replan, resource, playlist, flash]);
+    // `reloads`: Try again runs all of this again, as leaving and pressing play would.
+  }, [ratingKey, resume, report, startStream, stopStream, replan, resource, playlist, flash, reloads]);
+
+  // A failed stream still saves where the viewer was, so Continue Watching and Try again pick up there.
+  useEffect(() => {
+    if (error) report("stopped");
+  }, [error, report]);
 
   // Watchdog: a transcode Plex can't keep up with (stuck or slower than real
   // time) would otherwise buffer forever, so step down to a lighter plan.
@@ -625,7 +670,11 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
   }, []);
   const seekTo = useCallback((secs: number) => {
     const v = video.current;
-    if (v) v.currentTime = Math.max(0, Math.min(secs, live.current.duration || secs));
+    const to = Math.max(0, Math.min(secs, live.current.duration || secs));
+    // The playhead goes where the viewer clicked and waits there while the new spot loads.
+    setTime(to);
+    live.current.time = to;
+    if (v) v.currentTime = to;
     // A seek makes Plex start over at the new spot: that wait isn't a stall.
     starved.current = 0;
   }, []);
@@ -667,16 +716,20 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
     [startStream, replan],
   );
 
-  /** Starts over from the normal plan, as if the lighter ones had never been tried. */
+  /**
+   * Starts over the way leaving the player and pressing play again would:
+   * fresh info from Plex, the subtitle check, the normal plan, from where the
+   * viewer was.
+   */
   const retry = useCallback(() => {
-    if (!source.current || !caps.current) return;
+    if (source.current) forgetStep(source.current);
     step.current = null;
     triedSteps.current.clear();
-    forgetStep(source.current);
-    forceBurn.current = false;
+    resumeAt.current = live.current.time;
     setAttempts([]);
-    startStream(replan(live.current.quality), live.current.time);
-  }, [startStream, replan]);
+    setError(null);
+    setReloads((n) => n + 1);
+  }, []);
 
   // Plex picks the tracks on the server, so a change restarts the stream.
   const changeTracks = useCallback(
@@ -782,7 +835,10 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         playsInline
         onTimeUpdate={(e) => {
           const v = e.currentTarget;
-          setTime(v.currentTime);
+          // Before the stream plays, and while a seek loads, the element's clock
+          // is not the viewer's position: keep the one already shown.
+          if (ready.current && !v.seeking) setTime(v.currentTime);
+          setBufferedTo(bufferedAhead(v));
           // Some seeks (and hls.js nudging past a gap) never send "playing";
           // playback moving on with data ahead means it isn't buffering.
           if (!v.paused && !v.seeking && v.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) setBuffering(false);
@@ -792,7 +848,11 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         onPause={() => setPaused(true)}
         onWaiting={() => setBuffering(true)}
         onSeeking={() => setBuffering(true)}
-        onPlaying={() => setBuffering(false)}
+        onPlaying={() => {
+          ready.current = true;
+          setBuffering(false);
+        }}
+        onProgress={(e) => setBufferedTo(bufferedAhead(e.currentTarget))}
         onSeeked={(e) => !e.currentTarget.paused || setBuffering(false)}
         onCanPlay={(e) => e.currentTarget.paused && setBuffering(false)}
         onVolumeChange={(e) => {
@@ -934,7 +994,7 @@ export function Player({ ratingKey, resume, onClose, onPlayNext, playlist }: Pro
         </div>
 
         <div className="pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col gap-3 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pt-20 pb-5">
-          <SeekBar time={time} duration={duration} onSeek={seekTo} />
+          <SeekBar time={time} duration={duration} bufferedTo={bufferedTo} onSeek={seekTo} />
           <div className="flex items-center gap-1 text-white">
             {episodes && (
               <IconButton
@@ -1109,7 +1169,27 @@ function StreamMenu({
   );
 }
 
-function SeekBar({ time, duration, onSeek }: { time: number; duration: number; onSeek: (secs: number) => void }) {
+/** The end of the buffered range the playhead is in, or 0. */
+function bufferedAhead(v: HTMLVideoElement): number {
+  const t = v.currentTime;
+  for (let i = 0; i < v.buffered.length; i++) {
+    if (v.buffered.start(i) <= t + 0.5 && t <= v.buffered.end(i) + 0.5) return v.buffered.end(i);
+  }
+  return 0;
+}
+
+function SeekBar({
+  time,
+  duration,
+  bufferedTo,
+  onSeek,
+}: {
+  time: number;
+  duration: number;
+  /** Seconds of the episode loaded so far, drawn as a faint bar. */
+  bufferedTo: number;
+  onSeek: (secs: number) => void;
+}) {
   const bar = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
@@ -1121,6 +1201,7 @@ function SeekBar({ time, duration, onSeek }: { time: number; duration: number; o
 
   const shown = drag ?? time;
   const pct = duration ? (shown / duration) * 100 : 0;
+  const bufferedPct = duration ? Math.min(100, (Math.max(bufferedTo, time) / duration) * 100) : 0;
 
   return (
     <div
@@ -1141,6 +1222,7 @@ function SeekBar({ time, duration, onSeek }: { time: number; duration: number; o
       }}
     >
       <div className="relative h-1 w-full rounded-full bg-white/25 transition-[height] group-hover:h-1.5">
+        <div className="absolute inset-y-0 left-0 rounded-full bg-white/35" style={{ width: `${bufferedPct}%` }} />
         <div className="bg-primary absolute inset-y-0 left-0 rounded-full" style={{ width: `${pct}%` }} />
       </div>
       <div

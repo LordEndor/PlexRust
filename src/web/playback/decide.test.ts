@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decide, fallback, lighterPlans } from "./decide";
+import { decide, fallback, lighterPlans, withoutBurn } from "./decide";
 import type { BrowserCaps, QualityChoice, SourceMedia, SubtitleSource } from "./types";
 
 const original: QualityChoice = { label: "Original", name: "Original", maxBitrateKbps: null, maxWidth: 3840, maxHeight: 2160 };
@@ -178,11 +178,18 @@ describe("fallback", () => {
     expect(fallback(plan, src, chrome, original)?.subtitles).toEqual(plan.subtitles);
   });
 
-  it("burns embedded text subtitles when the video is transcoded anyway", () => {
+  it("keeps embedded text subtitles as text when the video is transcoded", () => {
     const plan = decide({ ...mp4, videoCodec: "mpeg2video", subtitle: sub("srt") }, chrome, original);
     expect(plan.mode).toBe("transcode");
-    expect(plan.subtitles).toEqual({ kind: "burn", streamId: 9 });
+    expect(plan.subtitles).toEqual({ kind: "sidecar", streamId: 9, format: "vtt", external: false });
     expect(plan.audioCodecOut).toBe("aac");
+  });
+
+  it("drops a burned-in subtitle when Plex refuses to burn it", () => {
+    const plan = decide({ ...mp4, subtitle: sub("pgs") }, chrome, original);
+    expect(plan.subtitles.kind).toBe("burn");
+    expect(withoutBurn(plan)).toMatchObject({ mode: "transcode", subtitles: { kind: "none" } });
+    expect(withoutBurn(decide(mp4, chrome, original))).toBeNull();
   });
 
   it("keeps external text subtitles as sidecars when transcoding", () => {
@@ -198,15 +205,14 @@ describe("lighterPlans", () => {
   it("caps an Original transcode at three times the source bitrate", () => {
     const plan = decide(dolbyVision, edge, original);
     expect(plan.mode).toBe("transcode");
-    expect(plan.subtitles.kind).toBe("burn");
+    expect(plan.subtitles.kind).toBe("sidecar");
     expect(plan.maxBitrateKbps).toBe(20400);
   });
 
-  it("steps from burned text subtitles to 1080p, the original picture, then 720p", () => {
+  it("steps to 1080p, the original picture, then 720p, keeping text subtitles as text", () => {
     const plans = lighterPlans(dolbyVision, edge, original);
-    expect(plans.map((p) => p.step)).toEqual(["subs", "1080p", "original", "720p"]);
-    const [subs, hd, remux, small] = plans;
-    expect(subs).toMatchObject({ mode: "transcode", maxHeight: 1440, subtitles: { kind: "sidecar" } });
+    expect(plans.map((p) => p.step)).toEqual(["1080p", "original", "720p"]);
+    const [hd, remux, small] = plans;
     expect(hd).toMatchObject({ mode: "transcode", maxWidth: 1920, maxHeight: 1080, maxBitrateKbps: 10000, subtitles: { kind: "sidecar" } });
     expect(remux).toMatchObject({ mode: "directStream", videoCodecOut: "hevc", subtitles: { kind: "sidecar" } });
     expect(small).toMatchObject({ mode: "transcode", maxHeight: 720, maxBitrateKbps: 4000 });
@@ -220,7 +226,7 @@ describe("lighterPlans", () => {
   });
 
   it("has no remux step when the browser can't decode the video", () => {
-    expect(lighterPlans(dolbyVision, chrome, original).map((p) => p.step)).toEqual(["subs", "1080p", "720p"]);
+    expect(lighterPlans(dolbyVision, chrome, original).map((p) => p.step)).toEqual(["1080p", "720p"]);
   });
 
   it("only goes smaller than the picked quality, and never to the untouched file", () => {

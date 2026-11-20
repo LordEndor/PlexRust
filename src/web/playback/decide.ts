@@ -92,10 +92,10 @@ function transcodePlan(
   const original = quality.maxBitrateKbps === null;
   const width = original ? ORIGINAL_TRANSCODE_MAX.width : quality.maxWidth;
   const height = original ? ORIGINAL_TRANSCODE_MAX.height : quality.maxHeight;
-  // Plex only hands out sidecar subtitle files as text; embedded ones are
-  // burned in, which costs nothing extra when the video is re-encoded anyway.
-  // (Unless that re-encode turned out too heavy: see lighterPlans.)
-  if (!keepSidecar && subtitles.kind === "sidecar" && !subtitles.external) subtitles = { kind: "burn", streamId: subtitles.streamId };
+  // Text subtitles stay text: the player checks before starting that Plex
+  // hands them out (or burns them when it won't), and burning in subtitles is
+  // what Albin's server refuses (HTTP 400) on re-encodes it otherwise accepts.
+  void keepSidecar;
   return {
     mode: "transcode",
     subtitles,
@@ -167,6 +167,19 @@ export function fallback(plan: PlaybackPlan, source: SourceMedia, caps: BrowserC
     return transcodePlan(source, quality, subtitles, ["Direct play failed: re-encoding instead", ...transcodeReasons(source, caps, quality, a)]);
   }
   return transcodePlan(source, quality, subtitles, ["Direct stream failed: re-encoding instead"]);
+}
+
+/**
+ * `plan` without its burned-in subtitle, after Plex refused or dropped the
+ * stream: a picture without subtitles beats no picture. Null when nothing is burned in.
+ */
+export function withoutBurn(plan: PlaybackPlan): PlaybackPlan | null {
+  if (plan.subtitles.kind !== "burn") return null;
+  return {
+    ...plan,
+    subtitles: { kind: "none" },
+    reasons: ["Plex couldn't burn in the subtitles: playing without them", ...plan.reasons],
+  };
 }
 
 const STALLED = "Plex couldn't keep up with the re-encode";
